@@ -950,6 +950,30 @@ services:
     volumes:
       - ./volumes/unstructured:/app/data
 
+  # For Docker Compose v2.4+
+  # xinference:
+  #   image: registry.cn-hangzhou.aliyuncs.com/xprobe_xinference/xinference:latest
+  #   container_name: xinference
+  #   restart: always
+  #   environment:
+  #     - XINFERENCE_MODEL_SRC=modelscope
+  #     - XINFERENCE_HOME=/root/appdata
+  #   volumes:
+  #     - ./xinference/appdata:/root/appdata
+  #   ports:
+  #     - 9997:9997
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - capabilities: [gpu]
+  #             count: 1
+  #   command: xinference-local -H 0.0.0.0
+  #   networks:
+  #     - ssrf_proxy_network
+  #     - default
+
+  # For old Docker Compose 
   xinference:
     image: registry.cn-hangzhou.aliyuncs.com/xprobe_xinference/xinference:latest
     container_name: xinference
@@ -961,12 +985,9 @@ services:
       - ./xinference/appdata:/root/appdata
     ports:
       - 9997:9997
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
-              count: 1
+    runtime: nvidia  # 指定使用 NVIDIA 运行时
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all  # 使用所有 GPU，或指定 GPU 索引，如 "0,1"
     command: xinference-local -H 0.0.0.0
     networks:
       - ssrf_proxy_network
