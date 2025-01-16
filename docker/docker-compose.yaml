@@ -951,14 +951,14 @@ services:
       - ./volumes/unstructured:/app/data
 
   xinference:
-    image: registry.cn-hangzhou.aliyuncs.com/xprobe_xinference/xinference:latest
+    image: registry.cn-hangzhou.aliyuncs.com/xprobe_xinference/xinference:v1.2.0
     container_name: xinference
     restart: always
     environment:
       - XINFERENCE_MODEL_SRC=modelscope
-    #   - XINFERENCE_HOME=/root/appdata
-    # volumes:
-    #   - ./xinference/appdata:/root/appdata
+      - XINFERENCE_HOME=/root/appdata
+    volumes:
+      - ./xinference/appdata:/root/appdata
     ports:
       - 9997:9997
     deploy:
