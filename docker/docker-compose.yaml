@@ -956,17 +956,18 @@ services:
     restart: always
     environment:
       - XINFERENCE_MODEL_SRC=modelscope
-      - XINFERENCE_HOME=/root/appdata
-    volumes:
-      - ./xinference/appdata:/root/appdata
+    #   - XINFERENCE_HOME=/root/appdata
+    # volumes:
+    #   - ./xinference/appdata:/root/appdata
     ports:
       - 9997:9997
     deploy:
       resources:
         reservations:
           devices:
-            - capabilities: [gpu]
+            - driver: nvidia
               count: 1
+              capabilities: [gpu]
     command: xinference-local -H 0.0.0.0
     networks:
       - ssrf_proxy_network
