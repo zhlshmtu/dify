@@ -981,13 +981,12 @@ services:
     environment:
       - XINFERENCE_MODEL_SRC=modelscope
       - XINFERENCE_HOME=/root/appdata
+      - NVIDIA_VISIBLE_DEVICES=all  # 使用所有 GPU，或指定 GPU 索引，如 "0,1"
     volumes:
       - ./xinference/appdata:/root/appdata
     ports:
       - 9997:9997
     runtime: nvidia  # 指定使用 NVIDIA 运行时
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all  # 使用所有 GPU，或指定 GPU 索引，如 "0,1"
     command: xinference-local -H 0.0.0.0
     networks:
       - ssrf_proxy_network
