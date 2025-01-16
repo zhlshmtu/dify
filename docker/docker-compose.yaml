@@ -965,9 +965,8 @@ services:
       resources:
         reservations:
           devices:
-            - driver: nvidia
+            - capabilities: [gpu]
               count: 1
-              capabilities: [gpu]
     command: xinference-local -H 0.0.0.0
     networks:
       - ssrf_proxy_network
