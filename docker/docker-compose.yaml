@@ -952,29 +952,6 @@ services:
     volumes:
       - ./volumes/unstructured:/app/data
 
-  xinference:
-    image: registry.cn-hangzhou.aliyuncs.com/xprobe_xinference/xinference:v1.2.0
-    container_name: xinference
-    restart: always
-    environment:
-      - XINFERENCE_MODEL_SRC=modelscope
-      - XINFERENCE_HOME=/root/appdata
-    volumes:
-      - ./xinference/appdata:/root/appdata
-    ports:
-      - 9997:9997
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: xinference-local -H 0.0.0.0
-    networks:
-      - ssrf_proxy_network
-      - default
-
 networks:
   # create a network between sandbox, api and ssrf_proxy, and can not access outside.
   ssrf_proxy_network:
