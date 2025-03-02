@@ -602,9 +602,8 @@ class TenantService:
         account: Account, name: Optional[str] = None, is_setup: Optional[bool] = False
     ):
         """Check if user have a workspace or not"""
-        # 增加对owner的判断
         available_ta = (
-            TenantAccountJoin.query.filter_by(account_id=account.id).filter_by(role="owner").order_by(TenantAccountJoin.id.asc()).first()
+            TenantAccountJoin.query.filter_by(account_id=account.id).order_by(TenantAccountJoin.id.asc()).first()
         )
 
         if available_ta:
