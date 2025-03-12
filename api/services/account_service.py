@@ -113,7 +113,7 @@ class AccountService:
             account.current_tenant_id = current_tenant.tenant_id
         else:
             available_ta = (
-                TenantAccountJoin.query.filter_by(account_id=account.id).filter_by(role="owner").order_by(TenantAccountJoin.id.asc()).first()
+                TenantAccountJoin.query.filter_by(account_id=account.id).order_by(TenantAccountJoin.id.asc()).first()
             )
             if not available_ta:
                 return None
@@ -602,7 +602,7 @@ class TenantService:
     ):
         """Check if user have a workspace or not"""
         available_ta = (
-            TenantAccountJoin.query.filter_by(account_id=account.id).filter_by(role="owner").order_by(TenantAccountJoin.id.asc()).first()
+            TenantAccountJoin.query.filter_by(account_id=account.id).order_by(TenantAccountJoin.id.asc()).first()
         )
 
         if available_ta:
