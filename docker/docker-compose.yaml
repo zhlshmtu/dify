@@ -622,6 +622,7 @@ services:
       - ./volumes/sandbox/dependencies:/dependencies
       - ./volumes/sandbox/appdata:/appdata
       - ./volumes/sandbox/conf:/conf
+      - ./volumes/app/storage/upload_files:/var/sandbox/sandbox-python/tmp/upload_files
     healthcheck:
       test: [ 'CMD', 'curl', '-f', 'http://localhost:8194/health' ]
     networks:
