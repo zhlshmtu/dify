@@ -386,6 +386,7 @@ const vars = {
   'background-gradient-bg-fill-chat-bg-2': 'var(--color-background-gradient-bg-fill-chat-bg-2)',
   'background-gradient-bg-fill-chat-bubble-bg-1': 'var(--color-background-gradient-bg-fill-chat-bubble-bg-1)',
   'background-gradient-bg-fill-chat-bubble-bg-2': 'var(--color-background-gradient-bg-fill-chat-bubble-bg-2)',
+  'background-gradient-bg-fill-chat-bubble-bg-3': 'var(--color-background-gradient-bg-fill-chat-bubble-bg-3)',
   'background-gradient-bg-fill-debug-bg-1': 'var(--color-background-gradient-bg-fill-debug-bg-1)',
   'background-gradient-bg-fill-debug-bg-2': 'var(--color-background-gradient-bg-fill-debug-bg-2)',
 
@@ -721,6 +722,8 @@ const vars = {
   'util-colors-midnight-midnight-600': 'var(--color-util-colors-midnight-midnight-600)',
   'util-colors-midnight-midnight-700': 'var(--color-util-colors-midnight-midnight-700)',
 
+  'third-party-Arize': 'var(--color-third-party-Arize)',
+  'third-party-Phoenix': 'var(--color-third-party-Phoenix)',
   'third-party-LangChain': 'var(--color-third-party-LangChain)',
   'third-party-Langfuse': 'var(--color-third-party-Langfuse)',
   'third-party-Github': 'var(--color-third-party-Github)',

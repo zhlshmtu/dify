@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
 } from 'react'
 import { setAutoFreeze } from 'immer'
@@ -41,10 +42,11 @@ import {
   useNodesSyncDraft,
   usePanelInteractions,
   useSelectionInteractions,
+  useSetWorkflowVarsWithValue,
   useShortcuts,
   useWorkflow,
   useWorkflowReadOnly,
-  useWorkflowUpdate,
+  useWorkflowRefreshDraft,
 } from './hooks'
 import CustomNode from './nodes'
 import CustomNoteNode from './note-node'
@@ -56,6 +58,7 @@ import { CUSTOM_LOOP_START_NODE } from './nodes/loop-start/constants'
 import CustomSimpleNode from './simple-node'
 import { CUSTOM_SIMPLE_NODE } from './simple-node/constants'
 import Operator from './operator'
+import Control from './operator/control'
 import CustomEdge from './custom-edge'
 import CustomConnectionLine from './custom-connection-line'
 import HelpLine from './help-line'
@@ -114,6 +117,32 @@ export const Workflow: FC<WorkflowProps> = memo(({
   const controlMode = useStore(s => s.controlMode)
   const nodeAnimation = useStore(s => s.nodeAnimation)
   const showConfirm = useStore(s => s.showConfirm)
+  const workflowCanvasHeight = useStore(s => s.workflowCanvasHeight)
+  const bottomPanelHeight = useStore(s => s.bottomPanelHeight)
+  const setWorkflowCanvasWidth = useStore(s => s.setWorkflowCanvasWidth)
+  const setWorkflowCanvasHeight = useStore(s => s.setWorkflowCanvasHeight)
+  const controlHeight = useMemo(() => {
+    if (!workflowCanvasHeight)
+      return '100%'
+    return workflowCanvasHeight - bottomPanelHeight
+  }, [workflowCanvasHeight, bottomPanelHeight])
+
+  // update workflow Canvas width and height
+  useEffect(() => {
+    if (workflowContainerRef.current) {
+      const resizeContainerObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { inlineSize, blockSize } = entry.borderBoxSize[0]
+          setWorkflowCanvasWidth(inlineSize)
+          setWorkflowCanvasHeight(blockSize)
+        }
+      })
+      resizeContainerObserver.observe(workflowContainerRef.current)
+      return () => {
+        resizeContainerObserver.disconnect()
+      }
+    }
+  }, [setWorkflowCanvasHeight, setWorkflowCanvasWidth])
 
   const {
     setShowConfirm,
@@ -160,7 +189,7 @@ export const Workflow: FC<WorkflowProps> = memo(({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const { handleRefreshWorkflowDraft } = useWorkflowUpdate()
+  const { handleRefreshWorkflowDraft } = useWorkflowRefreshDraft()
   const handleSyncWorkflowDraftWhenPageClose = useCallback(() => {
     if (document.visibilityState === 'hidden')
       syncWorkflowDraftWhenPageClose()
@@ -245,6 +274,11 @@ export const Workflow: FC<WorkflowProps> = memo(({
   })
 
   useShortcuts()
+  const { fetchInspectVars } = useSetWorkflowVarsWithValue()
+  useEffect(() => {
+    fetchInspectVars()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const store = useStoreApi()
   if (process.env.NODE_ENV === 'development') {
@@ -259,7 +293,7 @@ export const Workflow: FC<WorkflowProps> = memo(({
     <div
       id='workflow-container'
       className={`
-        relative h-full w-full min-w-[960px] 
+        relative h-full w-full min-w-[960px]
         ${workflowReadOnly && 'workflow-panel-animation'}
         ${nodeAnimation && 'workflow-node-animation'}
       `}
@@ -267,6 +301,12 @@ export const Workflow: FC<WorkflowProps> = memo(({
     >
       <SyncingDataModal />
       <CandidateNode />
+      <div
+        className='absolute left-0 top-0 z-10 flex w-12 items-center justify-center p-1 pl-2'
+        style={{ height: controlHeight }}
+      >
+        <Control />
+      </div>
       <Operator handleRedo={handleHistoryForward} handleUndo={handleHistoryBack} />
       <PanelContextmenu />
       <NodeContextmenu />
@@ -316,7 +356,7 @@ export const Workflow: FC<WorkflowProps> = memo(({
         nodesConnectable={!nodesReadOnly}
         nodesFocusable={!nodesReadOnly}
         edgesFocusable={!nodesReadOnly}
-        panOnScroll
+        panOnScroll={false}
         panOnDrag={controlMode === ControlMode.Hand && !workflowReadOnly}
         zoomOnPinch={!workflowReadOnly}
         zoomOnScroll={!workflowReadOnly}
