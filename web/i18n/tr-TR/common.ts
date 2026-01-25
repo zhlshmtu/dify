@@ -61,6 +61,10 @@ const translation = {
     selectAll: 'Hepsini Seç',
     deSelectAll: 'Hepsini Seçme',
     config: 'Konfigürasyon',
+    no: 'Hayır',
+    yes: 'Evet',
+    deleteConfirmTitle: 'Silinsin mi?',
+    confirmAction: 'Lütfen işleminizi onaylayın.',
   },
   errorMsg: {
     fieldRequired: '{{field}} gereklidir',
@@ -169,6 +173,7 @@ const translation = {
     support: 'Destek',
     compliance: 'Uygunluk',
     github: 'GitHub',
+    contactUs: 'Bize Ulaşın',
   },
   settings: {
     accountGroup: 'HESAP',
@@ -494,7 +499,18 @@ const translation = {
       addModelCredential: 'Model kimlik bilgisi ekle',
       specifyModelCredential: 'Model kimlik bilgilerini belirtin',
       authorizationError: 'Yetkilendirme hatası',
+      removeModel: 'Modeli Kaldır',
+      customModelCredentials: 'Özel Model Kimlik Bilgileri',
+      manageCredentials: 'Kimlik Bilgilerini Yönet',
+      addModel: 'Model ekle',
+      modelCredential: 'Model kimlik bilgileri',
+      editModelCredential: 'Model kimlik bilgilerini düzenleme',
+      selectModelCredential: 'Bir model kimlik bilgisi seçin',
+      addNewModelCredential: 'Yeni model kimlik bilgisi ekleme',
+      customModelCredentialsDeleteTip: 'Kimlik bilgisi kullanımda ve silinemiyor',
     },
+    parametersInvalidRemoved: 'Bazı parametreler geçersizdir ve kaldırılmıştır.',
+    installDataSourceProvider: 'Veri kaynağı sağlayıcılarını yükle',
   },
   dataSource: {
     add: 'Bir veri kaynağı ekle',
@@ -593,6 +609,7 @@ const translation = {
     viewDoc: 'Dökümantasyon görüntüle',
     relatedApp: 'bağlantılı uygulamalar',
     noRelatedApp: 'Bağlı uygulama yok',
+    pipeline: 'Ardışık düzen',
   },
   voiceInput: {
     speaking: 'Şimdi konuş...',
@@ -747,6 +764,9 @@ const translation = {
     subtitle: 'Lütfen bu yanıtla ilgili neyin yanlış gittiğini bize bildirin',
     title: 'Geri Bildirim Sağla',
     placeholder: 'Lütfen neyin yanlış gittiğini veya nasıl iyileşebileceğimizi açıklayın...',
+  },
+  label: {
+    optional: '(isteğe bağlı)',
   },
 }
 

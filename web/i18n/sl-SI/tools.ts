@@ -193,6 +193,16 @@ const translation = {
       confirm: 'Dodaj in avtoriziraj',
       timeout: 'Časovna omejitev',
       sseReadTimeout: 'SSE časovna omejitev branja',
+      timeoutPlaceholder: '30',
+      headers: 'Glave',
+      headerKeyPlaceholder: 'npr., Authorization',
+      headerValue: 'Vrednost glave',
+      headerKey: 'Ime glave',
+      addHeader: 'Dodaj glavo',
+      headersTip: 'Dodatni HTTP glavi za poslati z zahtevami MCP strežnika',
+      headerValuePlaceholder: 'npr., Bearer žeton123',
+      noHeaders: 'Nobena prilagojena glava ni konfigurirana',
+      maskedHeadersTip: 'Vrednosti glave so zakrite zaradi varnosti. Spremembe bodo posodobile dejanske vrednosti.',
     },
     delete: 'Odstrani strežnik MCP',
     deleteConfirmTitle: 'Odstraniti {mcp}?',
@@ -233,7 +243,12 @@ const translation = {
       },
       publishTip: 'Aplikacija ni objavljena. Najprej objavite aplikacijo.',
     },
+    toolItem: {
+      parameters: 'Parametri',
+      noDescription: 'Brez opisa',
+    },
   },
+  allTools: 'Vsa orodja',
 }
 
 export default translation

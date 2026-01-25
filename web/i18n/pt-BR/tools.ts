@@ -193,6 +193,16 @@ const translation = {
       confirm: 'Adicionar e Autorizar',
       sseReadTimeout: 'Tempo limite de leitura SSE',
       timeout: 'Tempo esgotado',
+      timeoutPlaceholder: 'trinta',
+      headerValue: 'Valor do Cabeçalho',
+      headerKeyPlaceholder: 'por exemplo, Autorização',
+      addHeader: 'Adicionar Cabeçalho',
+      headersTip: 'Cabeçalhos HTTP adicionais a serem enviados com as solicitações do servidor MCP',
+      headers: 'Cabeçalhos',
+      maskedHeadersTip: 'Os valores do cabeçalho estão mascarados por segurança. As alterações atualizarão os valores reais.',
+      headerKey: 'Nome do Cabeçalho',
+      noHeaders: 'Nenhum cabeçalho personalizado configurado',
+      headerValuePlaceholder: 'ex: Token de portador 123',
     },
     delete: 'Remover Servidor MCP',
     deleteConfirmTitle: 'Você gostaria de remover {{mcp}}?',
@@ -233,7 +243,12 @@ const translation = {
       },
       publishTip: 'Aplicativo não publicado. Por favor, publique o aplicativo primeiro.',
     },
+    toolItem: {
+      noDescription: 'Sem descrição',
+      parameters: 'Parâmetros',
+    },
   },
+  allTools: 'Todas as ferramentas',
 }
 
 export default translation

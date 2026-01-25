@@ -61,6 +61,10 @@ const translation = {
     deSelectAll: 'Вимкнути все',
     selectAll: 'Вибрати все',
     config: 'Конфігурація',
+    yes: 'Так',
+    no: 'Ні',
+    deleteConfirmTitle: 'Видалити?',
+    confirmAction: 'Будь ласка, підтвердіть свої дії.',
   },
   placeholder: {
     input: 'Будь ласка, введіть текст',
@@ -165,6 +169,7 @@ const translation = {
     compliance: 'Відповідність',
     support: 'Підтримка',
     github: 'Гітхаб',
+    contactUs: 'Зв’яжіться з нами',
   },
   settings: {
     accountGroup: 'ОБЛІКОВИЙ ЗАПИС',
@@ -491,7 +496,18 @@ const translation = {
       configLoadBalancing: 'Конфігурація балансування навантаження',
       addModelCredential: 'Додати облікові дані моделі',
       providerManagedTip: 'Поточна конфігурація розміщується провайдером.',
+      addModel: 'Додати модель',
+      removeModel: 'Видалити модель',
+      modelCredential: 'Облікові дані моделі',
+      manageCredentials: 'Керування обліковими даними',
+      selectModelCredential: 'Виберіть облікові дані моделі',
+      addNewModelCredential: 'Додайте нові облікові дані моделі',
+      customModelCredentials: 'Облікові дані користувацької моделі',
+      editModelCredential: 'Редагувати облікові дані моделі',
+      customModelCredentialsDeleteTip: 'Облікові дані використовуються і не можуть бути видалені',
     },
+    parametersInvalidRemoved: 'Деякі параметри є недійсними і були видалені',
+    installDataSourceProvider: 'Встановіть постачальників джерел даних',
   },
   dataSource: {
     add: 'Додати джерело даних',
@@ -590,6 +606,7 @@ const translation = {
     viewDoc: 'Переглянути документацію',
     relatedApp: 'пов\'язані програми',
     noRelatedApp: 'Немає пов\'язаних додатків',
+    pipeline: 'Трубопроводу',
   },
   voiceInput: {
     speaking: 'Говоріть зараз...',
@@ -748,6 +765,9 @@ const translation = {
     content: 'Зміст відгуку',
     placeholder: 'Будь ласка, опишіть, що пішло не так або як ми можемо покращити...',
     subtitle: 'Будь ласка, скажіть нам, що пішло не так із цією відповіддю',
+  },
+  label: {
+    optional: '(необов\'язково)',
   },
 }
 

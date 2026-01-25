@@ -193,6 +193,16 @@ const translation = {
       confirm: 'Ekle ve Yetkilendir',
       timeout: 'Zaman aşımı',
       sseReadTimeout: 'SSE Okuma Zaman Aşımı',
+      headers: 'Başlıklar',
+      headerKeyPlaceholder: 'örneğin, Yetkilendirme',
+      addHeader: 'Başlık Ekle',
+      headerValue: 'Başlık Değeri',
+      noHeaders: 'Özel başlıklar yapılandırılmamış',
+      headerKey: 'Başlık Adı',
+      timeoutPlaceholder: 'otuz',
+      headersTip: 'MCP sunucu istekleri ile gönderilecek ek HTTP başlıkları',
+      headerValuePlaceholder: 'örneğin, Taşıyıcı jeton123',
+      maskedHeadersTip: 'Başlık değerleri güvenlik amacıyla gizlenmiştir. Değişiklikler gerçek değerleri güncelleyecektir.',
     },
     delete: 'MCP Sunucusunu Kaldır',
     deleteConfirmTitle: '{mcp} kaldırılsın mı?',
@@ -233,7 +243,12 @@ const translation = {
       },
       publishTip: 'Uygulama yayınlanmadı. Lütfen önce uygulamayı yayınlayın.',
     },
+    toolItem: {
+      parameters: 'Parametreler',
+      noDescription: 'Açıklama yok',
+    },
   },
+  allTools: 'Tüm araçlar',
 }
 
 export default translation

@@ -9,7 +9,8 @@ from flask.testing import FlaskClient
 from sqlalchemy.orm import Session
 
 from app_factory import create_app
-from models import Account, DifySetup, Tenant, TenantAccountJoin, db
+from extensions.ext_database import db
+from models import Account, DifySetup, Tenant, TenantAccountJoin
 from services.account_service import AccountService, RegisterService
 
 
@@ -57,6 +58,7 @@ def setup_account(request) -> Generator[Account, None, None]:
             name=name,
             password=secrets.token_hex(16),
             ip_address="localhost",
+            language="en-US",
         )
 
     with _CACHED_APP.test_request_context():
