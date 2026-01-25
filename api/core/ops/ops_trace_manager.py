@@ -35,7 +35,6 @@ from extensions.ext_database import db
 from extensions.ext_storage import storage
 from models.model import App, AppModelConfig, Conversation, Message, MessageFile, TraceAppConfig
 from models.workflow import WorkflowAppLog
-from repositories.factory import DifyAPIRepositoryFactory
 from tasks.ops_trace_task import process_trace_tasks
 
 if TYPE_CHECKING:
@@ -377,20 +376,20 @@ class OpsTraceManager:
         return app_model_config
 
     @classmethod
-    def update_app_tracing_config(cls, app_id: str, enabled: bool, tracing_provider: str):
+    def update_app_tracing_config(cls, app_id: str, enabled: bool, tracing_provider: str | None):
         """
         Update app tracing config
         :param app_id: app id
         :param enabled: enabled
-        :param tracing_provider: tracing provider
+        :param tracing_provider: tracing provider (None when disabling)
         :return:
         """
         # auth check
-        try:
-            if enabled or tracing_provider is not None:
+        if tracing_provider is not None:
+            try:
                 provider_config_map[tracing_provider]
-        except KeyError:
-            raise ValueError(f"Invalid tracing provider: {tracing_provider}")
+            except KeyError:
+                raise ValueError(f"Invalid tracing provider: {tracing_provider}")
 
         app_config: App | None = db.session.query(App).where(App.id == app_id).first()
         if not app_config:
@@ -473,6 +472,9 @@ class TraceTask:
         if cls._workflow_run_repo is None:
             with cls._repo_lock:
                 if cls._workflow_run_repo is None:
+                    # Lazy import to avoid circular import during module initialization
+                    from repositories.factory import DifyAPIRepositoryFactory
+
                     session_maker = sessionmaker(bind=db.engine, expire_on_commit=False)
                     cls._workflow_run_repo = DifyAPIRepositoryFactory.create_api_workflow_run_repository(session_maker)
         return cls._workflow_run_repo

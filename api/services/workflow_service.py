@@ -13,9 +13,9 @@ from core.app.apps.advanced_chat.app_config_manager import AdvancedChatAppConfig
 from core.app.apps.workflow.app_config_manager import WorkflowAppConfigManager
 from core.file import File
 from core.repositories import DifyCoreRepositoryFactory
-from core.variables import Variable
-from core.variables.variables import VariableUnion
-from core.workflow.entities import VariablePool, WorkflowNodeExecution
+from core.variables import VariableBase
+from core.variables.variables import Variable
+from core.workflow.entities import WorkflowNodeExecution
 from core.workflow.enums import ErrorStrategy, WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
 from core.workflow.errors import WorkflowNodeRunFailedError
 from core.workflow.graph_events import GraphNodeEventBase, NodeRunFailedEvent, NodeRunSucceededEvent
@@ -24,6 +24,7 @@ from core.workflow.nodes import NodeType
 from core.workflow.nodes.base.node import Node
 from core.workflow.nodes.node_mapping import LATEST_VERSION, NODE_TYPE_CLASSES_MAPPING
 from core.workflow.nodes.start.entities import StartNodeData
+from core.workflow.runtime import VariablePool
 from core.workflow.system_variable import SystemVariable
 from core.workflow.workflow_entry import WorkflowEntry
 from enums.cloud_plan import CloudPlan
@@ -197,8 +198,8 @@ class WorkflowService:
         features: dict,
         unique_hash: str | None,
         account: Account,
-        environment_variables: Sequence[Variable],
-        conversation_variables: Sequence[Variable],
+        environment_variables: Sequence[VariableBase],
+        conversation_variables: Sequence[VariableBase],
     ) -> Workflow:
         """
         Sync draft workflow
@@ -1043,7 +1044,7 @@ def _setup_variable_pool(
     workflow: Workflow,
     node_type: NodeType,
     conversation_id: str,
-    conversation_variables: list[Variable],
+    conversation_variables: list[VariableBase],
 ):
     # Only inject system variables for START node type.
     if node_type == NodeType.START or node_type.is_trigger_node:
@@ -1069,9 +1070,9 @@ def _setup_variable_pool(
         system_variables=system_variable,
         user_inputs=user_inputs,
         environment_variables=workflow.environment_variables,
-        # Based on the definition of `VariableUnion`,
-        # `list[Variable]` can be safely used as `list[VariableUnion]` since they are compatible.
-        conversation_variables=cast(list[VariableUnion], conversation_variables),  #
+        # Based on the definition of `Variable`,
+        # `VariableBase` instances can be safely used as `Variable` since they are compatible.
+        conversation_variables=cast(list[Variable], conversation_variables),  #
     )
 
     return variable_pool

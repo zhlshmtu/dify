@@ -1,38 +1,33 @@
-import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import '@testing-library/jest-dom'
+import * as React from 'react'
+import { createReactI18nextMock } from '@/test/i18n-mock'
 import InputWithCopy from './index'
 
-// Mock the copy-to-clipboard library
-jest.mock('copy-to-clipboard', () => jest.fn(() => true))
+// Mock navigator.clipboard for foxact/use-clipboard
+const mockWriteText = vi.fn(() => Promise.resolve())
 
-// Mock the i18n hook
-jest.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => {
-      const translations: Record<string, string> = {
-        'common.operation.copy': 'Copy',
-        'common.operation.copied': 'Copied',
-        'appOverview.overview.appInfo.embedded.copy': 'Copy',
-        'appOverview.overview.appInfo.embedded.copied': 'Copied',
-      }
-      return translations[key] || key
-    },
-  }),
-}))
-
-// Mock lodash-es debounce
-jest.mock('lodash-es', () => ({
-  debounce: (fn: any) => fn,
+// Mock the i18n hook with custom translations for test assertions
+vi.mock('react-i18next', () => createReactI18nextMock({
+  'operation.copy': 'Copy',
+  'operation.copied': 'Copied',
+  'overview.appInfo.embedded.copy': 'Copy',
+  'overview.appInfo.embedded.copied': 'Copied',
 }))
 
 describe('InputWithCopy component', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
+    mockWriteText.mockClear()
+    // Setup navigator.clipboard mock
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: mockWriteText,
+      },
+    })
   })
 
   it('renders correctly with default props', () => {
-    const mockOnChange = jest.fn()
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="test value" onChange={mockOnChange} />)
     const input = screen.getByDisplayValue('test value')
     const copyButton = screen.getByRole('button')
@@ -41,7 +36,7 @@ describe('InputWithCopy component', () => {
   })
 
   it('hides copy button when showCopyButton is false', () => {
-    const mockOnChange = jest.fn()
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="test value" onChange={mockOnChange} showCopyButton={false} />)
     const input = screen.getByDisplayValue('test value')
     const copyButton = screen.queryByRole('button')
@@ -50,40 +45,44 @@ describe('InputWithCopy component', () => {
   })
 
   it('copies input value when copy button is clicked', async () => {
-    const copyToClipboard = require('copy-to-clipboard')
-    const mockOnChange = jest.fn()
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="test value" onChange={mockOnChange} />)
 
     const copyButton = screen.getByRole('button')
     fireEvent.click(copyButton)
 
-    expect(copyToClipboard).toHaveBeenCalledWith('test value')
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith('test value')
+    })
   })
 
   it('copies custom value when copyValue prop is provided', async () => {
-    const copyToClipboard = require('copy-to-clipboard')
-    const mockOnChange = jest.fn()
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="display value" onChange={mockOnChange} copyValue="custom copy value" />)
 
     const copyButton = screen.getByRole('button')
     fireEvent.click(copyButton)
 
-    expect(copyToClipboard).toHaveBeenCalledWith('custom copy value')
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith('custom copy value')
+    })
   })
 
   it('calls onCopy callback when copy button is clicked', async () => {
-    const onCopyMock = jest.fn()
-    const mockOnChange = jest.fn()
+    const onCopyMock = vi.fn()
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="test value" onChange={mockOnChange} onCopy={onCopyMock} />)
 
     const copyButton = screen.getByRole('button')
     fireEvent.click(copyButton)
 
-    expect(onCopyMock).toHaveBeenCalledWith('test value')
+    await waitFor(() => {
+      expect(onCopyMock).toHaveBeenCalledWith('test value')
+    })
   })
 
   it('shows copied state after successful copy', async () => {
-    const mockOnChange = jest.fn()
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="test value" onChange={mockOnChange} />)
 
     const copyButton = screen.getByRole('button')
@@ -99,7 +98,7 @@ describe('InputWithCopy component', () => {
   })
 
   it('passes through all input props correctly', () => {
-    const mockOnChange = jest.fn()
+    const mockOnChange = vi.fn()
     render(
       <InputWithCopy
         value="test value"
@@ -118,22 +117,23 @@ describe('InputWithCopy component', () => {
     expect(input).toHaveClass('custom-class')
   })
 
-  it('handles empty value correctly', () => {
-    const copyToClipboard = require('copy-to-clipboard')
-    const mockOnChange = jest.fn()
+  it('handles empty value correctly', async () => {
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="" onChange={mockOnChange} />)
-    const input = screen.getByRole('textbox')
+    const input = screen.getByDisplayValue('')
     const copyButton = screen.getByRole('button')
 
     expect(input).toBeInTheDocument()
     expect(copyButton).toBeInTheDocument()
 
     fireEvent.click(copyButton)
-    expect(copyToClipboard).toHaveBeenCalledWith('')
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith('')
+    })
   })
 
   it('maintains focus on input after copy', async () => {
-    const mockOnChange = jest.fn()
+    const mockOnChange = vi.fn()
     render(<InputWithCopy value="test value" onChange={mockOnChange} />)
 
     const input = screen.getByDisplayValue('test value')
