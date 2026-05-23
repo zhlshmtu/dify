@@ -4,16 +4,31 @@ from urllib.parse import urlencode
 
 import pytest
 
-from core.app.entities.app_invoke_entities import InvokeFrom
-from core.workflow.entities.variable_pool import VariablePool
-from core.workflow.graph_engine.entities.graph import Graph
-from core.workflow.graph_engine.entities.graph_init_params import GraphInitParams
-from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
-from core.workflow.nodes.http_request.node import HttpRequestNode
-from core.workflow.system_variable import SystemVariable
-from models.enums import UserFrom
-from models.workflow import WorkflowType
-from tests.integration_tests.workflow.nodes.__mock.http import setup_http_mock
+from configs import dify_config
+from core.app.entities.app_invoke_entities import InvokeFrom, UserFrom
+from core.helper.ssrf_proxy import ssrf_proxy
+from core.tools.tool_file_manager import ToolFileManager
+from core.workflow.node_factory import DifyNodeFactory
+from core.workflow.node_runtime import DifyFileReferenceFactory
+from core.workflow.system_variables import build_system_variables
+from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.file.file_manager import file_manager
+from graphon.graph import Graph
+from graphon.nodes.http_request import HttpRequestNode, HttpRequestNodeConfig, HttpRequestNodeData
+from graphon.runtime import GraphRuntimeState, VariablePool
+from tests.workflow_test_utils import build_test_graph_init_params
+
+pytest_plugins = ("tests.integration_tests.workflow.nodes.__mock.http",)
+
+HTTP_REQUEST_CONFIG = HttpRequestNodeConfig(
+    max_connect_timeout=dify_config.HTTP_REQUEST_MAX_CONNECT_TIMEOUT,
+    max_read_timeout=dify_config.HTTP_REQUEST_MAX_READ_TIMEOUT,
+    max_write_timeout=dify_config.HTTP_REQUEST_MAX_WRITE_TIMEOUT,
+    max_binary_size=dify_config.HTTP_REQUEST_NODE_MAX_BINARY_SIZE,
+    max_text_size=dify_config.HTTP_REQUEST_NODE_MAX_TEXT_SIZE,
+    ssl_verify=dify_config.HTTP_REQUEST_NODE_SSL_VERIFY,
+    ssrf_default_max_retries=dify_config.SSRF_DEFAULT_MAX_RETRIES,
+)
 
 
 def init_http_node(config: dict):
@@ -25,17 +40,14 @@ def init_http_node(config: dict):
                 "target": "1",
             },
         ],
-        "nodes": [{"data": {"type": "start"}, "id": "start"}, config],
+        "nodes": [{"data": {"type": "start", "title": "Start"}, "id": "start"}, config],
     }
 
-    graph = Graph.init(graph_config=graph_config)
-
-    init_params = GraphInitParams(
-        tenant_id="1",
-        app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
+    init_params = build_test_graph_init_params(
         workflow_id="1",
         graph_config=graph_config,
+        tenant_id="1",
+        app_id="1",
         user_id="1",
         user_from=UserFrom.ACCOUNT,
         invoke_from=InvokeFrom.DEBUGGER,
@@ -43,8 +55,8 @@ def init_http_node(config: dict):
     )
 
     # construct variable pool
-    variable_pool = VariablePool(
-        system_variables=SystemVariable(user_id="aaa", files=[]),
+    variable_pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(user_id="aaa", files=[]),
         user_inputs={},
         environment_variables=[],
         conversation_variables=[],
@@ -52,17 +64,27 @@ def init_http_node(config: dict):
     variable_pool.add(["a", "args1"], 1)
     variable_pool.add(["a", "args2"], 2)
 
-    node = HttpRequestNode(
-        id=str(uuid.uuid4()),
+    graph_runtime_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time.perf_counter())
+
+    # Create node factory
+    node_factory = DifyNodeFactory(
         graph_init_params=init_params,
-        graph=graph,
-        graph_runtime_state=GraphRuntimeState(variable_pool=variable_pool, start_at=time.perf_counter()),
-        config=config,
+        graph_runtime_state=graph_runtime_state,
     )
 
-    # Initialize node data
-    if "data" in config:
-        node.init_node_data(config["data"])
+    graph = Graph.init(graph_config=graph_config, node_factory=node_factory, root_node_id="start")
+
+    node = HttpRequestNode(
+        node_id=str(uuid.uuid4()),
+        data=HttpRequestNodeData.model_validate(config["data"]),
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+        http_request_config=HTTP_REQUEST_CONFIG,
+        http_client=ssrf_proxy,
+        tool_file_manager_factory=ToolFileManager,
+        file_manager=file_manager,
+        file_reference_factory=DifyFileReferenceFactory(init_params.run_context),
+    )
 
     return node
 
@@ -73,6 +95,7 @@ def test_get(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -106,6 +129,7 @@ def test_no_auth(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -135,6 +159,7 @@ def test_custom_authorization_header(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -165,20 +190,22 @@ def test_custom_authorization_header(setup_http_mock):
 
 
 @pytest.mark.parametrize("setup_http_mock", [["none"]], indirect=True)
-def test_custom_auth_with_empty_api_key_does_not_set_header(setup_http_mock):
-    """Test: In custom authentication mode, when the api_key is empty, no header should be set."""
-    from core.workflow.entities.variable_pool import VariablePool
-    from core.workflow.nodes.http_request.entities import (
+def test_custom_auth_with_empty_api_key_raises_error(setup_http_mock):
+    """Test: In custom authentication mode, when the api_key is empty, AuthorizationConfigError should be raised."""
+    from core.workflow.system_variables import build_system_variables
+    from graphon.enums import BuiltinNodeTypes
+    from graphon.nodes.http_request.entities import (
         HttpRequestNodeAuthorization,
         HttpRequestNodeData,
         HttpRequestNodeTimeout,
     )
-    from core.workflow.nodes.http_request.executor import Executor
-    from core.workflow.system_variable import SystemVariable
+    from graphon.nodes.http_request.exc import AuthorizationConfigError
+    from graphon.nodes.http_request.executor import Executor
+    from graphon.runtime import VariablePool
 
     # Create variable pool
-    variable_pool = VariablePool(
-        system_variables=SystemVariable(user_id="test", files=[]),
+    variable_pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(user_id="test", files=[]),
         user_inputs={},
         environment_variables=[],
         conversation_variables=[],
@@ -186,6 +213,7 @@ def test_custom_auth_with_empty_api_key_does_not_set_header(setup_http_mock):
 
     # Create node data with custom auth and empty api_key
     node_data = HttpRequestNodeData(
+        type=BuiltinNodeTypes.HTTP_REQUEST,
         title="http",
         desc="",
         url="http://example.com",
@@ -204,16 +232,16 @@ def test_custom_auth_with_empty_api_key_does_not_set_header(setup_http_mock):
         ssl_verify=True,
     )
 
-    # Create executor
-    executor = Executor(
-        node_data=node_data, timeout=HttpRequestNodeTimeout(connect=10, read=30, write=10), variable_pool=variable_pool
-    )
-
-    # Get assembled headers
-    headers = executor._assembling_headers()
-
-    # When api_key is empty, the custom header should NOT be set
-    assert "X-Custom-Auth" not in headers
+    # Create executor should raise AuthorizationConfigError
+    with pytest.raises(AuthorizationConfigError, match="API key is required"):
+        Executor(
+            node_data=node_data,
+            timeout=HttpRequestNodeTimeout(connect=10, read=30, write=10),
+            http_request_config=HTTP_REQUEST_CONFIG,
+            variable_pool=variable_pool,
+            http_client=ssrf_proxy,
+            file_manager=file_manager,
+        )
 
 
 @pytest.mark.parametrize("setup_http_mock", [["none"]], indirect=True)
@@ -227,6 +255,7 @@ def test_bearer_authorization_with_custom_header_ignored(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -267,6 +296,7 @@ def test_basic_authorization_with_custom_header_ignored(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -299,13 +329,15 @@ def test_basic_authorization_with_custom_header_ignored(setup_http_mock):
 @pytest.mark.parametrize("setup_http_mock", [["none"]], indirect=True)
 def test_custom_authorization_with_empty_api_key(setup_http_mock):
     """
-    Test that custom authorization doesn't set header when api_key is empty.
-    This test verifies the fix for issue #23554.
+    Test that custom authorization raises error when api_key is empty.
+    This test verifies the fix for issue #21830.
     """
+
     node = init_http_node(
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -326,11 +358,10 @@ def test_custom_authorization_with_empty_api_key(setup_http_mock):
     )
 
     result = node._run()
-    assert result.process_data is not None
-    data = result.process_data.get("request", "")
-
-    # Custom header should NOT be set when api_key is empty
-    assert "X-Custom-Auth:" not in data
+    # Should fail with AuthorizationConfigError
+    assert result.status == WorkflowNodeExecutionStatus.FAILED
+    assert "API key is required" in result.error
+    assert result.error_type == "AuthorizationConfigError"
 
 
 @pytest.mark.parametrize("setup_http_mock", [["none"]], indirect=True)
@@ -339,6 +370,7 @@ def test_template(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -374,6 +406,7 @@ def test_json(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "post",
@@ -416,6 +449,7 @@ def test_x_www_form_urlencoded(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "post",
@@ -463,6 +497,7 @@ def test_form_data(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "post",
@@ -513,6 +548,7 @@ def test_none_data(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "post",
@@ -546,6 +582,7 @@ def test_mock_404(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -575,6 +612,7 @@ def test_multi_colons_parse(setup_http_mock):
         config={
             "id": "1",
             "data": {
+                "type": "http-request",
                 "title": "http",
                 "desc": "",
                 "method": "get",
@@ -627,10 +665,11 @@ def test_nested_object_variable_selector(setup_http_mock):
             },
         ],
         "nodes": [
-            {"data": {"type": "start"}, "id": "start"},
+            {"data": {"type": "start", "title": "Start"}, "id": "start"},
             {
                 "id": "1",
                 "data": {
+                    "type": "http-request",
                     "title": "http",
                     "desc": "",
                     "method": "get",
@@ -651,14 +690,11 @@ def test_nested_object_variable_selector(setup_http_mock):
         ],
     }
 
-    graph = Graph.init(graph_config=graph_config)
-
-    init_params = GraphInitParams(
-        tenant_id="1",
-        app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
+    init_params = build_test_graph_init_params(
         workflow_id="1",
         graph_config=graph_config,
+        tenant_id="1",
+        app_id="1",
         user_id="1",
         user_from=UserFrom.ACCOUNT,
         invoke_from=InvokeFrom.DEBUGGER,
@@ -666,8 +702,8 @@ def test_nested_object_variable_selector(setup_http_mock):
     )
 
     # Create independent variable pool for this test only
-    variable_pool = VariablePool(
-        system_variables=SystemVariable(user_id="aaa", files=[]),
+    variable_pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(user_id="aaa", files=[]),
         user_inputs={},
         environment_variables=[],
         conversation_variables=[],
@@ -676,17 +712,27 @@ def test_nested_object_variable_selector(setup_http_mock):
     variable_pool.add(["a", "args2"], 2)
     variable_pool.add(["a", "args3"], {"nested": "nested_value"})  # Only for this test
 
-    node = HttpRequestNode(
-        id=str(uuid.uuid4()),
+    graph_runtime_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time.perf_counter())
+
+    # Create node factory
+    node_factory = DifyNodeFactory(
         graph_init_params=init_params,
-        graph=graph,
-        graph_runtime_state=GraphRuntimeState(variable_pool=variable_pool, start_at=time.perf_counter()),
-        config=graph_config["nodes"][1],
+        graph_runtime_state=graph_runtime_state,
     )
 
-    # Initialize node data
-    if "data" in graph_config["nodes"][1]:
-        node.init_node_data(graph_config["nodes"][1]["data"])
+    graph = Graph.init(graph_config=graph_config, node_factory=node_factory, root_node_id="start")
+
+    node = HttpRequestNode(
+        node_id=str(uuid.uuid4()),
+        data=HttpRequestNodeData.model_validate(graph_config["nodes"][1]["data"]),
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+        http_request_config=HTTP_REQUEST_CONFIG,
+        http_client=ssrf_proxy,
+        tool_file_manager_factory=ToolFileManager,
+        file_manager=file_manager,
+        file_reference_factory=DifyFileReferenceFactory(init_params.run_context),
+    )
 
     result = node._run()
     assert result.process_data is not None

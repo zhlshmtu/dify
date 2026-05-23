@@ -1,17 +1,28 @@
 import json
 import logging
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, NotRequired, TypedDict, cast
 
 from configs import dify_config
-from core.app.app_config.entities import VariableEntity, VariableEntityType
 from core.app.entities.app_invoke_entities import InvokeFrom
 from core.app.features.rate_limiting.rate_limit import RateLimitGenerator
 from core.mcp import types as mcp_types
+from graphon.variables.input_entities import VariableEntity, VariableEntityType
 from models.model import App, AppMCPServer, AppMode, EndUser
 from services.app_generate_service import AppGenerateService
 
 logger = logging.getLogger(__name__)
+
+
+class ToolParameterSchemaDict(TypedDict):
+    type: str
+    properties: dict[str, Any]
+    required: list[str]
+
+
+class ToolArgumentsDict(TypedDict):
+    query: NotRequired[str]
+    inputs: dict[str, Any]
 
 
 def handle_mcp_request(
@@ -38,6 +49,7 @@ def handle_mcp_request(
     """
 
     request_type = type(request.root)
+    request_root = request.root
 
     def create_success_response(result_data: mcp_types.Result) -> mcp_types.JSONRPCResponse:
         """Create success response with business result data"""
@@ -58,21 +70,20 @@ def handle_mcp_request(
             error=error_data,
         )
 
-    # Request handler mapping using functional approach
-    request_handlers = {
-        mcp_types.InitializeRequest: lambda: handle_initialize(mcp_server.description),
-        mcp_types.ListToolsRequest: lambda: handle_list_tools(
-            app.name, app.mode, user_input_form, mcp_server.description, mcp_server.parameters_dict
-        ),
-        mcp_types.CallToolRequest: lambda: handle_call_tool(app, request, user_input_form, end_user),
-        mcp_types.PingRequest: lambda: handle_ping(),
-    }
-
     try:
-        # Dispatch request to appropriate handler
-        handler = request_handlers.get(request_type)
-        if handler:
-            return create_success_response(handler())
+        # Dispatch request to appropriate handler based on instance type
+        if isinstance(request_root, mcp_types.InitializeRequest):
+            return create_success_response(handle_initialize(mcp_server.description))
+        elif isinstance(request_root, mcp_types.ListToolsRequest):
+            return create_success_response(
+                handle_list_tools(
+                    app.name, app.mode, user_input_form, mcp_server.description, mcp_server.parameters_dict
+                )
+            )
+        elif isinstance(request_root, mcp_types.CallToolRequest):
+            return create_success_response(handle_call_tool(app, request, user_input_form, end_user))
+        elif isinstance(request_root, mcp_types.PingRequest):
+            return create_success_response(handle_ping())
         else:
             return create_error_response(mcp_types.METHOD_NOT_FOUND, f"Method not found: {request_type.__name__}")
 
@@ -118,7 +129,7 @@ def handle_list_tools(
             mcp_types.Tool(
                 name=app_name,
                 description=description,
-                inputSchema=parameter_schema,
+                inputSchema=cast(dict[str, Any], parameter_schema),
             )
         ],
     )
@@ -142,7 +153,7 @@ def handle_call_tool(
         end_user,
         args,
         InvokeFrom.SERVICE_API,
-        streaming=app.mode == AppMode.AGENT_CHAT.value,
+        streaming=app.mode == AppMode.AGENT_CHAT,
     )
 
     answer = extract_answer_from_response(app, response)
@@ -153,11 +164,11 @@ def build_parameter_schema(
     app_mode: str,
     user_input_form: list[VariableEntity],
     parameters_dict: dict[str, str],
-) -> dict[str, Any]:
+) -> ToolParameterSchemaDict:
     """Build parameter schema for the tool"""
     parameters, required = convert_input_form_to_parameters(user_input_form, parameters_dict)
 
-    if app_mode in {AppMode.COMPLETION.value, AppMode.WORKFLOW.value}:
+    if app_mode in {AppMode.COMPLETION, AppMode.WORKFLOW}:
         return {
             "type": "object",
             "properties": parameters,
@@ -173,17 +184,18 @@ def build_parameter_schema(
     }
 
 
-def prepare_tool_arguments(app: App, arguments: dict[str, Any]) -> dict[str, Any]:
+def prepare_tool_arguments(app: App, arguments: dict[str, Any]) -> ToolArgumentsDict:
     """Prepare arguments based on app mode"""
-    if app.mode == AppMode.WORKFLOW.value:
-        return {"inputs": arguments}
-    elif app.mode == AppMode.COMPLETION.value:
-        return {"query": "", "inputs": arguments}
-    else:
-        # Chat modes - create a copy to avoid modifying original dict
-        args_copy = arguments.copy()
-        query = args_copy.pop("query", "")
-        return {"query": query, "inputs": args_copy}
+    match app.mode:
+        case AppMode.WORKFLOW:
+            return {"inputs": arguments}
+        case AppMode.COMPLETION:
+            return {"query": "", "inputs": arguments}
+        case _:
+            # Chat modes - create a copy to avoid modifying original dict
+            args_copy = arguments.copy()
+            query = args_copy.pop("query", "")
+            return {"query": query, "inputs": args_copy}
 
 
 def extract_answer_from_response(app: App, response: Any) -> str:
@@ -217,17 +229,13 @@ def process_streaming_response(response: RateLimitGenerator) -> str:
 
 def process_mapping_response(app: App, response: Mapping) -> str:
     """Process mapping response based on app mode"""
-    if app.mode in {
-        AppMode.ADVANCED_CHAT.value,
-        AppMode.COMPLETION.value,
-        AppMode.CHAT.value,
-        AppMode.AGENT_CHAT.value,
-    }:
-        return response.get("answer", "")
-    elif app.mode == AppMode.WORKFLOW.value:
-        return json.dumps(response["data"]["outputs"], ensure_ascii=False)
-    else:
-        raise ValueError("Invalid app mode: " + str(app.mode))
+    match app.mode:
+        case AppMode.ADVANCED_CHAT | AppMode.COMPLETION | AppMode.CHAT | AppMode.AGENT_CHAT:
+            return response.get("answer", "")
+        case AppMode.WORKFLOW:
+            return json.dumps(response["data"]["outputs"], ensure_ascii=False)
+        case _:
+            raise ValueError("Invalid app mode: " + str(app.mode))
 
 
 def convert_input_form_to_parameters(
@@ -259,4 +267,12 @@ def convert_input_form_to_parameters(
             parameters[item.variable]["enum"] = item.options
         elif item.type == VariableEntityType.NUMBER:
             parameters[item.variable]["type"] = "number"
+        elif item.type == VariableEntityType.CHECKBOX:
+            parameters[item.variable]["type"] = "boolean"
+        elif item.type == VariableEntityType.JSON_OBJECT:
+            parameters[item.variable]["type"] = "object"
+            if item.json_schema:
+                for key in ("properties", "required", "additionalProperties"):
+                    if key in item.json_schema:
+                        parameters[item.variable][key] = item.json_schema[key]
     return parameters, required

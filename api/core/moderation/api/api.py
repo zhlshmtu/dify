@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, override
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -12,7 +12,7 @@ from models.api_based_extension import APIBasedExtension
 
 class ModerationInputParams(BaseModel):
     app_id: str = ""
-    inputs: dict = Field(default_factory=dict)
+    inputs: dict[str, Any] = Field(default_factory=dict)
     query: str = ""
 
 
@@ -25,7 +25,8 @@ class ApiModeration(Moderation):
     name: str = "api"
 
     @classmethod
-    def validate_config(cls, tenant_id: str, config: dict):
+    @override
+    def validate_config(cls, tenant_id: str, config: dict[str, Any]):
         """
         Validate the incoming form config data.
 
@@ -43,7 +44,8 @@ class ApiModeration(Moderation):
         if not extension:
             raise ValueError("API-based Extension not found. Please check it again.")
 
-    def moderation_for_inputs(self, inputs: dict, query: str = "") -> ModerationInputsResult:
+    @override
+    def moderation_for_inputs(self, inputs: dict[str, Any], query: str = "") -> ModerationInputsResult:
         flagged = False
         preset_response = ""
         if self.config is None:
@@ -53,12 +55,13 @@ class ApiModeration(Moderation):
             params = ModerationInputParams(app_id=self.app_id, inputs=inputs, query=query)
 
             result = self._get_config_by_requestor(APIBasedExtensionPoint.APP_MODERATION_INPUT, params.model_dump())
-            return ModerationInputsResult(**result)
+            return ModerationInputsResult.model_validate(result)
 
         return ModerationInputsResult(
             flagged=flagged, action=ModerationAction.DIRECT_OUTPUT, preset_response=preset_response
         )
 
+    @override
     def moderation_for_outputs(self, text: str) -> ModerationOutputsResult:
         flagged = False
         preset_response = ""
@@ -69,13 +72,13 @@ class ApiModeration(Moderation):
             params = ModerationOutputParams(app_id=self.app_id, text=text)
 
             result = self._get_config_by_requestor(APIBasedExtensionPoint.APP_MODERATION_OUTPUT, params.model_dump())
-            return ModerationOutputsResult(**result)
+            return ModerationOutputsResult.model_validate(result)
 
         return ModerationOutputsResult(
             flagged=flagged, action=ModerationAction.DIRECT_OUTPUT, preset_response=preset_response
         )
 
-    def _get_config_by_requestor(self, extension_point: APIBasedExtensionPoint, params: dict):
+    def _get_config_by_requestor(self, extension_point: APIBasedExtensionPoint, params: dict[str, Any]):
         if self.config is None:
             raise ValueError("The config is not set.")
         extension = self._get_api_based_extension(self.tenant_id, self.config.get("api_based_extension_id", ""))
@@ -87,7 +90,7 @@ class ApiModeration(Moderation):
         return result
 
     @staticmethod
-    def _get_api_based_extension(tenant_id: str, api_based_extension_id: str) -> Optional[APIBasedExtension]:
+    def _get_api_based_extension(tenant_id: str, api_based_extension_id: str) -> APIBasedExtension | None:
         stmt = select(APIBasedExtension).where(
             APIBasedExtension.tenant_id == tenant_id, APIBasedExtension.id == api_based_extension_id
         )

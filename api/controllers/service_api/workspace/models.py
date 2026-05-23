@@ -3,7 +3,7 @@ from flask_restx import Resource
 
 from controllers.service_api import service_api_ns
 from controllers.service_api.wraps import validate_dataset_token
-from core.model_runtime.utils.encoders import jsonable_encoder
+from graphon.model_runtime.utils.encoders import jsonable_encoder
 from services.model_provider_service import ModelProviderService
 
 
@@ -19,7 +19,7 @@ class ModelProviderAvailableModelApi(Resource):
         }
     )
     @validate_dataset_token
-    def get(self, _, model_type):
+    def get(self, _, model_type: str):
         """Get available models by model type.
 
         Returns a list of available models for the specified model type.

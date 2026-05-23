@@ -5,23 +5,41 @@ automatic cleanup, backup and restore.
 Supports complete lifecycle management for knowledge base files.
 """
 
+from __future__ import annotations
+
 import json
 import logging
+import operator
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum, auto
+from typing import Any, TypedDict
+
+from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
+_metadata_adapter: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
 
-class FileStatus(Enum):
+
+class StorageStatisticsDict(TypedDict):
+    total_files: int
+    active_files: int
+    archived_files: int
+    deleted_files: int
+    total_size: int
+    versions_count: int
+    oldest_file: str | None
+    newest_file: str | None
+
+
+class FileStatus(StrEnum):
     """File status enumeration"""
 
-    ACTIVE = "active"  # Active status
-    ARCHIVED = "archived"  # Archived
-    DELETED = "deleted"  # Deleted (soft delete)
-    BACKUP = "backup"  # Backup file
+    ACTIVE = auto()  # Active status
+    ARCHIVED = auto()  # Archived
+    DELETED = auto()  # Deleted (soft delete)
+    BACKUP = auto()  # Backup file
 
 
 @dataclass
@@ -34,9 +52,9 @@ class FileMetadata:
     modified_at: datetime
     version: int | None
     status: FileStatus
-    checksum: Optional[str] = None
-    tags: Optional[dict[str, str]] = None
-    parent_version: Optional[int] = None
+    checksum: str | None = None
+    tags: dict[str, str] | None = None
+    parent_version: int | None = None
 
     def to_dict(self):
         """Convert to dictionary format"""
@@ -47,7 +65,7 @@ class FileMetadata:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> "FileMetadata":
+    def from_dict(cls, data: dict[str, Any]) -> FileMetadata:
         """Create instance from dictionary"""
         data = data.copy()
         data["created_at"] = datetime.fromisoformat(data["created_at"])
@@ -59,7 +77,7 @@ class FileMetadata:
 class FileLifecycleManager:
     """File lifecycle manager"""
 
-    def __init__(self, storage, dataset_id: Optional[str] = None):
+    def __init__(self, storage, dataset_id: str | None = None):
         """Initialize lifecycle manager
 
         Args:
@@ -74,9 +92,9 @@ class FileLifecycleManager:
         self._deleted_prefix = ".deleted/"
 
         # Get permission manager (if exists)
-        self._permission_manager: Optional[Any] = getattr(storage, "_permission_manager", None)
+        self._permission_manager: Any | None = getattr(storage, "_permission_manager", None)
 
-    def save_with_lifecycle(self, filename: str, data: bytes, tags: Optional[dict[str, str]] = None) -> FileMetadata:
+    def save_with_lifecycle(self, filename: str, data: bytes, tags: dict[str, str] | None = None) -> FileMetadata:
         """Save file and manage lifecycle
 
         Args:
@@ -150,7 +168,7 @@ class FileLifecycleManager:
             logger.exception("Failed to save file with lifecycle")
             raise
 
-    def get_file_metadata(self, filename: str) -> Optional[FileMetadata]:
+    def get_file_metadata(self, filename: str) -> FileMetadata | None:
         """Get file metadata
 
         Args:
@@ -198,9 +216,9 @@ class FileLifecycleManager:
                             # Temporarily create basic metadata information
                         except ValueError:
                             continue
-            except:
+            except Exception:
                 # If cannot scan version files, only return current version
-                pass
+                logger.exception("Failed to scan version files for %s", filename)
 
             return sorted(versions, key=lambda x: x.version or 0, reverse=True)
 
@@ -263,7 +281,7 @@ class FileLifecycleManager:
                 logger.warning("File %s not found in metadata", filename)
                 return False
 
-            metadata_dict[filename]["status"] = FileStatus.ARCHIVED.value
+            metadata_dict[filename]["status"] = FileStatus.ARCHIVED
             metadata_dict[filename]["modified_at"] = datetime.now().isoformat()
 
             self._save_metadata(metadata_dict)
@@ -308,7 +326,7 @@ class FileLifecycleManager:
             # Update metadata
             metadata_dict = self._load_metadata()
             if filename in metadata_dict:
-                metadata_dict[filename]["status"] = FileStatus.DELETED.value
+                metadata_dict[filename]["status"] = FileStatus.DELETED
                 metadata_dict[filename]["modified_at"] = datetime.now().isoformat()
                 self._save_metadata(metadata_dict)
 
@@ -356,7 +374,7 @@ class FileLifecycleManager:
                 # Cleanup old versions for each file
                 for base_filename, versions in file_versions.items():
                     # Sort by version number
-                    versions.sort(key=lambda x: x[0], reverse=True)
+                    versions.sort(key=operator.itemgetter(0), reverse=True)
 
                     # Keep the newest max_versions versions, delete the rest
                     if len(versions) > max_versions:
@@ -377,7 +395,7 @@ class FileLifecycleManager:
             logger.exception("Failed to cleanup old versions")
             return 0
 
-    def get_storage_statistics(self) -> dict[str, Any]:
+    def get_storage_statistics(self) -> StorageStatisticsDict:
         """Get storage statistics
 
         Returns:
@@ -386,16 +404,16 @@ class FileLifecycleManager:
         try:
             metadata_dict = self._load_metadata()
 
-            stats: dict[str, Any] = {
-                "total_files": len(metadata_dict),
-                "active_files": 0,
-                "archived_files": 0,
-                "deleted_files": 0,
-                "total_size": 0,
-                "versions_count": 0,
-                "oldest_file": None,
-                "newest_file": None,
-            }
+            stats = StorageStatisticsDict(
+                total_files=len(metadata_dict),
+                active_files=0,
+                archived_files=0,
+                deleted_files=0,
+                total_size=0,
+                versions_count=0,
+                oldest_file=None,
+                newest_file=None,
+            )
 
             oldest_date = None
             newest_date = None
@@ -430,9 +448,18 @@ class FileLifecycleManager:
 
         except Exception:
             logger.exception("Failed to get storage statistics")
-            return {}
+            return StorageStatisticsDict(
+                total_files=0,
+                active_files=0,
+                archived_files=0,
+                deleted_files=0,
+                total_size=0,
+                versions_count=0,
+                oldest_file=None,
+                newest_file=None,
+            )
 
-    def _create_version_backup(self, filename: str, metadata: dict):
+    def _create_version_backup(self, filename: str, metadata: dict[str, Any]):
         """Create version backup"""
         try:
             # Read current file content
@@ -452,15 +479,15 @@ class FileLifecycleManager:
         try:
             if self._storage.exists(self._metadata_file):
                 metadata_content = self._storage.load_once(self._metadata_file)
-                result = json.loads(metadata_content.decode("utf-8"))
-                return dict(result) if result else {}
+                result = _metadata_adapter.validate_json(metadata_content)
+                return result or {}
             else:
                 return {}
         except Exception as e:
             logger.warning("Failed to load metadata: %s", e)
             return {}
 
-    def _save_metadata(self, metadata_dict: dict):
+    def _save_metadata(self, metadata_dict: dict[str, Any]):
         """Save metadata file"""
         try:
             metadata_content = json.dumps(metadata_dict, indent=2, ensure_ascii=False)

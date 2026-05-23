@@ -10,7 +10,6 @@ api = ExternalApi(
     version="1.0",
     title="Web API",
     description="Public APIs for web applications including file uploads, chat interactions, and app management",
-    doc="/docs",  # Enable Swagger UI at /api/docs
 )
 
 # Create namespace
@@ -24,6 +23,7 @@ from . import (
     feature,
     files,
     forgot_password,
+    human_input_form,
     login,
     message,
     passport,
@@ -31,6 +31,29 @@ from . import (
     saved_message,
     site,
     workflow,
+    workflow_events,
 )
 
 api.add_namespace(web_ns)
+
+__all__ = [
+    "api",
+    "app",
+    "audio",
+    "bp",
+    "completion",
+    "conversation",
+    "feature",
+    "files",
+    "forgot_password",
+    "human_input_form",
+    "login",
+    "message",
+    "passport",
+    "remote_files",
+    "saved_message",
+    "site",
+    "web_ns",
+    "workflow",
+    "workflow_events",
+]

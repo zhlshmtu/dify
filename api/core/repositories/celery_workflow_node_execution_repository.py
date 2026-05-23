@@ -7,16 +7,15 @@ providing improved performance by offloading database operations to background w
 
 import logging
 from collections.abc import Sequence
-from typing import Optional, Union
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecution
-from core.workflow.repositories.workflow_node_execution_repository import (
+from core.repositories.factory import (
     OrderConfig,
     WorkflowNodeExecutionRepository,
 )
+from graphon.entities import WorkflowNodeExecution
 from libs.helper import extract_tenant_id
 from models import Account, CreatorUserRole, EndUser
 from models.workflow import WorkflowNodeExecutionTriggeredFrom
@@ -44,8 +43,8 @@ class CeleryWorkflowNodeExecutionRepository(WorkflowNodeExecutionRepository):
 
     _session_factory: sessionmaker
     _tenant_id: str
-    _app_id: Optional[str]
-    _triggered_from: Optional[WorkflowNodeExecutionTriggeredFrom]
+    _app_id: str | None
+    _triggered_from: WorkflowNodeExecutionTriggeredFrom | None
     _creator_user_id: str
     _creator_user_role: CreatorUserRole
     _execution_cache: dict[str, WorkflowNodeExecution]
@@ -54,9 +53,9 @@ class CeleryWorkflowNodeExecutionRepository(WorkflowNodeExecutionRepository):
     def __init__(
         self,
         session_factory: sessionmaker | Engine,
-        user: Union[Account, EndUser],
-        app_id: Optional[str],
-        triggered_from: Optional[WorkflowNodeExecutionTriggeredFrom],
+        user: Account | EndUser,
+        app_id: str | None,
+        triggered_from: WorkflowNodeExecutionTriggeredFrom | None,
     ):
         """
         Initialize the repository with Celery task configuration and context information.
@@ -81,7 +80,7 @@ class CeleryWorkflowNodeExecutionRepository(WorkflowNodeExecutionRepository):
         tenant_id = extract_tenant_id(user)
         if not tenant_id:
             raise ValueError("User must have a tenant_id or current_tenant_id")
-        self._tenant_id = tenant_id  # type: ignore[assignment]  # We've already checked tenant_id is not None
+        self._tenant_id = tenant_id
 
         # Store app context
         self._app_id = app_id
@@ -94,10 +93,10 @@ class CeleryWorkflowNodeExecutionRepository(WorkflowNodeExecutionRepository):
         self._creator_user_role = CreatorUserRole.ACCOUNT if isinstance(user, Account) else CreatorUserRole.END_USER
 
         # In-memory cache for workflow node executions
-        self._execution_cache: dict[str, WorkflowNodeExecution] = {}
+        self._execution_cache = {}
 
         # Cache for mapping workflow_execution_ids to execution IDs for efficient retrieval
-        self._workflow_execution_mapping: dict[str, list[str]] = {}
+        self._workflow_execution_mapping = {}
 
         logger.info(
             "Initialized CeleryWorkflowNodeExecutionRepository for tenant %s, app %s, triggered_from %s",
@@ -148,24 +147,24 @@ class CeleryWorkflowNodeExecutionRepository(WorkflowNodeExecutionRepository):
             # For now, we'll re-raise the exception
             raise
 
-    def get_by_workflow_run(
+    def get_by_workflow_execution(
         self,
-        workflow_run_id: str,
-        order_config: Optional[OrderConfig] = None,
+        workflow_execution_id: str,
+        order_config: OrderConfig | None = None,
     ) -> Sequence[WorkflowNodeExecution]:
         """
-        Retrieve all WorkflowNodeExecution instances for a specific workflow run from cache.
+        Retrieve all workflow node executions for a workflow execution from cache.
 
         Args:
-            workflow_run_id: The workflow run ID
+            workflow_execution_id: The workflow execution identifier
             order_config: Optional configuration for ordering results
 
         Returns:
             A sequence of WorkflowNodeExecution instances
         """
         try:
-            # Get execution IDs for this workflow run from cache
-            execution_ids = self._workflow_execution_mapping.get(workflow_run_id, [])
+            # Get execution IDs for this workflow execution from cache
+            execution_ids = self._workflow_execution_mapping.get(workflow_execution_id, [])
 
             # Retrieve executions from cache
             result = []
@@ -182,9 +181,16 @@ class CeleryWorkflowNodeExecutionRepository(WorkflowNodeExecutionRepository):
                 for field_name in reversed(order_config.order_by):
                     result.sort(key=lambda x: getattr(x, field_name, 0), reverse=reverse)
 
-            logger.debug("Retrieved %d workflow node executions for run %s from cache", len(result), workflow_run_id)
+            logger.debug(
+                "Retrieved %d workflow node executions for execution %s from cache",
+                len(result),
+                workflow_execution_id,
+            )
             return result
 
         except Exception:
-            logger.exception("Failed to get workflow node executions for run %s from cache", workflow_run_id)
+            logger.exception(
+                "Failed to get workflow node executions for execution %s from cache",
+                workflow_execution_id,
+            )
             return []

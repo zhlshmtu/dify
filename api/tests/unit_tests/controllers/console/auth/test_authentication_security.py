@@ -1,5 +1,6 @@
 """Test authentication security to prevent user enumeration."""
 
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,7 +10,11 @@ from flask_restx import Api
 import services.errors.account
 from controllers.console.auth.error import AuthenticationFailedError
 from controllers.console.auth.login import LoginApi
-from controllers.console.error import AccountNotFound
+
+
+def encode_password(password: str) -> str:
+    """Helper to encode password as Base64 for testing."""
+    return base64.b64encode(password.encode("utf-8")).decode()
 
 
 class TestAuthenticationSecurity:
@@ -27,38 +32,41 @@ class TestAuthenticationSecurity:
     @patch("controllers.console.auth.login.FeatureService.get_system_features")
     @patch("controllers.console.auth.login.AccountService.is_login_error_rate_limit")
     @patch("controllers.console.auth.login.AccountService.authenticate")
-    @patch("controllers.console.auth.login.AccountService.send_reset_password_email")
+    @patch("controllers.console.auth.login.AccountService.add_login_error_rate_limit")
     @patch("controllers.console.auth.login.dify_config.BILLING_ENABLED", False)
-    @patch("controllers.console.auth.login.RegisterService.get_invitation_if_token_valid")
+    @patch("controllers.console.auth.login.RegisterService.get_invitation_with_case_fallback")
     def test_login_invalid_email_with_registration_allowed(
-        self, mock_get_invitation, mock_send_email, mock_authenticate, mock_is_rate_limit, mock_features, mock_db
+        self, mock_get_invitation, mock_add_rate_limit, mock_authenticate, mock_is_rate_limit, mock_features, mock_db
     ):
-        """Test that invalid email sends reset password email when registration is allowed."""
+        """Test that invalid email raises AuthenticationFailedError when account not found."""
         # Arrange
         mock_is_rate_limit.return_value = False
         mock_get_invitation.return_value = None
-        mock_authenticate.side_effect = services.errors.account.AccountNotFoundError("Account not found")
-        mock_db.session.query.return_value.first.return_value = MagicMock()  # Mock setup exists
+        mock_authenticate.side_effect = services.errors.account.AccountPasswordError("Invalid email or password.")
         mock_features.return_value.is_allow_register = True
-        mock_send_email.return_value = "token123"
 
         # Act
         with self.app.test_request_context(
-            "/login", method="POST", json={"email": "nonexistent@example.com", "password": "WrongPass123!"}
+            "/login",
+            method="POST",
+            json={"email": "nonexistent@example.com", "password": encode_password("WrongPass123!")},
         ):
             login_api = LoginApi()
-            result = login_api.post()
 
-        # Assert
-        assert result == {"result": "fail", "data": "token123", "code": "account_not_found"}
-        mock_send_email.assert_called_once_with(email="nonexistent@example.com", language="en-US")
+            # Assert
+            with pytest.raises(AuthenticationFailedError) as exc_info:
+                login_api.post()
+
+        assert exc_info.value.error_code == "authentication_failed"
+        assert exc_info.value.description == "Invalid email or password."
+        mock_add_rate_limit.assert_called_once_with("nonexistent@example.com")
 
     @patch("controllers.console.wraps.db")
     @patch("controllers.console.auth.login.AccountService.is_login_error_rate_limit")
     @patch("controllers.console.auth.login.AccountService.authenticate")
     @patch("controllers.console.auth.login.AccountService.add_login_error_rate_limit")
     @patch("controllers.console.auth.login.dify_config.BILLING_ENABLED", False)
-    @patch("controllers.console.auth.login.RegisterService.get_invitation_if_token_valid")
+    @patch("controllers.console.auth.login.RegisterService.get_invitation_with_case_fallback")
     def test_login_wrong_password_returns_error(
         self, mock_get_invitation, mock_add_rate_limit, mock_authenticate, mock_is_rate_limit, mock_db
     ):
@@ -67,11 +75,12 @@ class TestAuthenticationSecurity:
         mock_is_rate_limit.return_value = False
         mock_get_invitation.return_value = None
         mock_authenticate.side_effect = services.errors.account.AccountPasswordError("Wrong password")
-        mock_db.session.query.return_value.first.return_value = MagicMock()  # Mock setup exists
 
         # Act
         with self.app.test_request_context(
-            "/login", method="POST", json={"email": "existing@example.com", "password": "WrongPass123!"}
+            "/login",
+            method="POST",
+            json={"email": "existing@example.com", "password": encode_password("WrongPass123!")},
         ):
             login_api = LoginApi()
 
@@ -87,30 +96,34 @@ class TestAuthenticationSecurity:
     @patch("controllers.console.auth.login.FeatureService.get_system_features")
     @patch("controllers.console.auth.login.AccountService.is_login_error_rate_limit")
     @patch("controllers.console.auth.login.AccountService.authenticate")
+    @patch("controllers.console.auth.login.AccountService.add_login_error_rate_limit")
     @patch("controllers.console.auth.login.dify_config.BILLING_ENABLED", False)
-    @patch("controllers.console.auth.login.RegisterService.get_invitation_if_token_valid")
+    @patch("controllers.console.auth.login.RegisterService.get_invitation_with_case_fallback")
     def test_login_invalid_email_with_registration_disabled(
-        self, mock_get_invitation, mock_authenticate, mock_is_rate_limit, mock_features, mock_db
+        self, mock_get_invitation, mock_add_rate_limit, mock_authenticate, mock_is_rate_limit, mock_features, mock_db
     ):
-        """Test that invalid email raises AccountNotFound when registration is disabled."""
+        """Test that invalid email raises AuthenticationFailedError when account not found."""
         # Arrange
         mock_is_rate_limit.return_value = False
         mock_get_invitation.return_value = None
-        mock_authenticate.side_effect = services.errors.account.AccountNotFoundError("Account not found")
-        mock_db.session.query.return_value.first.return_value = MagicMock()  # Mock setup exists
+        mock_authenticate.side_effect = services.errors.account.AccountPasswordError("Invalid email or password.")
         mock_features.return_value.is_allow_register = False
 
         # Act
         with self.app.test_request_context(
-            "/login", method="POST", json={"email": "nonexistent@example.com", "password": "WrongPass123!"}
+            "/login",
+            method="POST",
+            json={"email": "nonexistent@example.com", "password": encode_password("WrongPass123!")},
         ):
             login_api = LoginApi()
 
             # Assert
-            with pytest.raises(AccountNotFound) as exc_info:
+            with pytest.raises(AuthenticationFailedError) as exc_info:
                 login_api.post()
 
-        assert exc_info.value.error_code == "account_not_found"
+        assert exc_info.value.error_code == "authentication_failed"
+        assert exc_info.value.description == "Invalid email or password."
+        mock_add_rate_limit.assert_called_once_with("nonexistent@example.com")
 
     @patch("controllers.console.wraps.db")
     @patch("controllers.console.auth.login.FeatureService.get_system_features")
@@ -119,7 +132,6 @@ class TestAuthenticationSecurity:
     def test_reset_password_with_existing_account(self, mock_send_email, mock_get_user, mock_features, mock_db):
         """Test that reset password returns success with token for existing accounts."""
         # Mock the setup check
-        mock_db.session.query.return_value.first.return_value = MagicMock()  # Mock setup exists
 
         # Test with existing account
         mock_get_user.return_value = MagicMock(email="existing@example.com")

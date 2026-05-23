@@ -1,6 +1,5 @@
 """Unit tests for workflow node execution conflict handling."""
 
-from datetime import datetime
 from unittest.mock import MagicMock, Mock
 
 import psycopg2.errors
@@ -11,11 +10,12 @@ from sqlalchemy.orm import sessionmaker
 from core.repositories.sqlalchemy_workflow_node_execution_repository import (
     SQLAlchemyWorkflowNodeExecutionRepository,
 )
-from core.workflow.entities.workflow_node_execution import (
+from graphon.entities.workflow_node_execution import (
     WorkflowNodeExecution,
     WorkflowNodeExecutionStatus,
 )
-from core.workflow.nodes.enums import NodeType
+from graphon.enums import BuiltinNodeTypes
+from libs.datetime_utils import naive_utc_now
 from models import Account, WorkflowNodeExecutionTriggeredFrom
 
 
@@ -70,11 +70,11 @@ class TestWorkflowNodeExecutionConflictHandling:
             workflow_execution_id="test-workflow-execution-id",
             node_execution_id="test-node-execution-id",
             node_id="test-node-id",
-            node_type=NodeType.START,
+            node_type=BuiltinNodeTypes.START,
             title="Test Node",
             index=1,
             status=WorkflowNodeExecutionStatus.RUNNING,
-            created_at=datetime.utcnow(),
+            created_at=naive_utc_now(),
         )
 
         original_id = execution.id
@@ -108,11 +108,11 @@ class TestWorkflowNodeExecutionConflictHandling:
             workflow_execution_id="test-workflow-execution-id",
             node_execution_id="test-node-execution-id",
             node_id="test-node-id",
-            node_type=NodeType.START,
+            node_type=BuiltinNodeTypes.START,
             title="Test Node",
             index=1,
             status=WorkflowNodeExecutionStatus.SUCCEEDED,
-            created_at=datetime.utcnow(),
+            created_at=naive_utc_now(),
         )
 
         # Save should update existing record
@@ -153,11 +153,11 @@ class TestWorkflowNodeExecutionConflictHandling:
             workflow_execution_id="test-workflow-execution-id",
             node_execution_id="test-node-execution-id",
             node_id="test-node-id",
-            node_type=NodeType.START,
+            node_type=BuiltinNodeTypes.START,
             title="Test Node",
             index=1,
             status=WorkflowNodeExecutionStatus.RUNNING,
-            created_at=datetime.utcnow(),
+            created_at=naive_utc_now(),
         )
 
         # Save should raise IntegrityError after max retries
@@ -195,11 +195,11 @@ class TestWorkflowNodeExecutionConflictHandling:
             workflow_execution_id="test-workflow-execution-id",
             node_execution_id="test-node-execution-id",
             node_id="test-node-id",
-            node_type=NodeType.START,
+            node_type=BuiltinNodeTypes.START,
             title="Test Node",
             index=1,
             status=WorkflowNodeExecutionStatus.RUNNING,
-            created_at=datetime.utcnow(),
+            created_at=naive_utc_now(),
         )
 
         # Save should raise error immediately

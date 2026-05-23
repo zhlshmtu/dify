@@ -1,10 +1,12 @@
 import logging
+from typing import Literal
 
-from flask_login import current_user
-from flask_restx import marshal_with, reqparse
-from flask_restx.inputs import int_range
+from flask import request
+from pydantic import BaseModel, TypeAdapter
 from werkzeug.exceptions import InternalServerError, NotFound
 
+from controllers.common.controller_schemas import MessageFeedbackPayload, MessageListQuery
+from controllers.common.schema import register_response_schema_models, register_schema_models
 from controllers.console.app.error import (
     AppMoreLikeThisDisabledError,
     CompletionRequestError,
@@ -20,10 +22,12 @@ from controllers.console.explore.error import (
 from controllers.console.explore.wraps import InstalledAppResource
 from core.app.entities.app_invoke_entities import InvokeFrom
 from core.errors.error import ModelCurrentlyNotSupportError, ProviderTokenNotInitError, QuotaExceededError
-from core.model_runtime.errors.invoke import InvokeError
-from fields.message_fields import message_infinite_scroll_pagination_fields
+from fields.conversation_fields import ResultResponse
+from fields.message_fields import MessageInfiniteScrollPagination, MessageListItem, SuggestedQuestionsResponse
+from graphon.model_runtime.errors.invoke import InvokeError
 from libs import helper
-from libs.helper import uuid_value
+from libs.login import current_account_with_tenant
+from models.enums import FeedbackRating
 from models.model import AppMode
 from services.app_generate_service import AppGenerateService
 from services.errors.app import MoreLikeThisDisabledError
@@ -35,74 +39,101 @@ from services.errors.message import (
 )
 from services.message_service import MessageService
 
+from .. import console_ns
+
 logger = logging.getLogger(__name__)
 
 
+class MoreLikeThisQuery(BaseModel):
+    response_mode: Literal["blocking", "streaming"]
+
+
+register_schema_models(console_ns, MessageListQuery, MessageFeedbackPayload, MoreLikeThisQuery)
+register_response_schema_models(console_ns, ResultResponse, SuggestedQuestionsResponse)
+
+
+@console_ns.route(
+    "/installed-apps/<uuid:installed_app_id>/messages",
+    endpoint="installed_app_messages",
+)
 class MessageListApi(InstalledAppResource):
-    @marshal_with(message_infinite_scroll_pagination_fields)
+    @console_ns.expect(console_ns.models[MessageListQuery.__name__])
     def get(self, installed_app):
+        current_user, _ = current_account_with_tenant()
         app_model = installed_app.app
 
         app_mode = AppMode.value_of(app_model.mode)
         if app_mode not in {AppMode.CHAT, AppMode.AGENT_CHAT, AppMode.ADVANCED_CHAT}:
             raise NotChatAppError()
-
-        parser = reqparse.RequestParser()
-        parser.add_argument("conversation_id", required=True, type=uuid_value, location="args")
-        parser.add_argument("first_id", type=uuid_value, location="args")
-        parser.add_argument("limit", type=int_range(1, 100), required=False, default=20, location="args")
-        args = parser.parse_args()
+        args = MessageListQuery.model_validate(request.args.to_dict())
 
         try:
-            return MessageService.pagination_by_first_id(
-                app_model, current_user, args["conversation_id"], args["first_id"], args["limit"]
+            pagination = MessageService.pagination_by_first_id(
+                app_model,
+                current_user,
+                str(args.conversation_id),
+                str(args.first_id) if args.first_id else None,
+                args.limit,
             )
+            adapter = TypeAdapter(MessageListItem)
+            items = [adapter.validate_python(message, from_attributes=True) for message in pagination.data]
+            return MessageInfiniteScrollPagination(
+                limit=pagination.limit,
+                has_more=pagination.has_more,
+                data=items,
+            ).model_dump(mode="json")
         except ConversationNotExistsError:
             raise NotFound("Conversation Not Exists.")
         except FirstMessageNotExistsError:
             raise NotFound("First Message Not Exists.")
 
 
+@console_ns.route(
+    "/installed-apps/<uuid:installed_app_id>/messages/<uuid:message_id>/feedbacks",
+    endpoint="installed_app_message_feedback",
+)
 class MessageFeedbackApi(InstalledAppResource):
+    @console_ns.expect(console_ns.models[MessageFeedbackPayload.__name__])
+    @console_ns.response(200, "Feedback submitted successfully", console_ns.models[ResultResponse.__name__])
     def post(self, installed_app, message_id):
+        current_user, _ = current_account_with_tenant()
         app_model = installed_app.app
 
         message_id = str(message_id)
 
-        parser = reqparse.RequestParser()
-        parser.add_argument("rating", type=str, choices=["like", "dislike", None], location="json")
-        parser.add_argument("content", type=str, location="json")
-        args = parser.parse_args()
+        payload = MessageFeedbackPayload.model_validate(console_ns.payload or {})
 
         try:
             MessageService.create_feedback(
                 app_model=app_model,
                 message_id=message_id,
                 user=current_user,
-                rating=args.get("rating"),
-                content=args.get("content"),
+                rating=FeedbackRating(payload.rating) if payload.rating else None,
+                content=payload.content,
             )
         except MessageNotExistsError:
             raise NotFound("Message Not Exists.")
 
-        return {"result": "success"}
+        return ResultResponse(result="success").model_dump(mode="json")
 
 
+@console_ns.route(
+    "/installed-apps/<uuid:installed_app_id>/messages/<uuid:message_id>/more-like-this",
+    endpoint="installed_app_more_like_this",
+)
 class MessageMoreLikeThisApi(InstalledAppResource):
+    @console_ns.expect(console_ns.models[MoreLikeThisQuery.__name__])
     def get(self, installed_app, message_id):
+        current_user, _ = current_account_with_tenant()
         app_model = installed_app.app
         if app_model.mode != "completion":
             raise NotCompletionAppError()
 
         message_id = str(message_id)
 
-        parser = reqparse.RequestParser()
-        parser.add_argument(
-            "response_mode", type=str, required=True, choices=["blocking", "streaming"], location="args"
-        )
-        args = parser.parse_args()
+        args = MoreLikeThisQuery.model_validate(request.args.to_dict())
 
-        streaming = args["response_mode"] == "streaming"
+        streaming = args.response_mode == "streaming"
 
         try:
             response = AppGenerateService.generate_more_like_this(
@@ -132,8 +163,14 @@ class MessageMoreLikeThisApi(InstalledAppResource):
             raise InternalServerError()
 
 
+@console_ns.route(
+    "/installed-apps/<uuid:installed_app_id>/messages/<uuid:message_id>/suggested-questions",
+    endpoint="installed_app_suggested_question",
+)
 class MessageSuggestedQuestionApi(InstalledAppResource):
+    @console_ns.response(200, "Success", console_ns.models[SuggestedQuestionsResponse.__name__])
     def get(self, installed_app, message_id):
+        current_user, _ = current_account_with_tenant()
         app_model = installed_app.app
         app_mode = AppMode.value_of(app_model.mode)
         if app_mode not in {AppMode.CHAT, AppMode.AGENT_CHAT, AppMode.ADVANCED_CHAT}:
@@ -163,4 +200,4 @@ class MessageSuggestedQuestionApi(InstalledAppResource):
             logger.exception("internal server error.")
             raise InternalServerError()
 
-        return {"data": questions}
+        return SuggestedQuestionsResponse(data=questions).model_dump(mode="json")

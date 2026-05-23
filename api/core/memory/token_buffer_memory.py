@@ -1,12 +1,16 @@
 from collections.abc import Sequence
-from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
 
 from core.app.app_config.features.file_upload.manager import FileUploadConfigManager
-from core.file import file_manager
+from core.app.file_access import DatabaseFileAccessController
 from core.model_manager import ModelInstance
-from core.model_runtime.entities import (
+from core.prompt.utils.extract_thread_messages import extract_thread_messages
+from extensions.ext_database import db
+from factories import file_factory
+from graphon.file import file_manager
+from graphon.model_runtime.entities import (
     AssistantPromptMessage,
     ImagePromptMessageContent,
     PromptMessage,
@@ -14,12 +18,13 @@ from core.model_runtime.entities import (
     TextPromptMessageContent,
     UserPromptMessage,
 )
-from core.model_runtime.entities.message_entities import PromptMessageContentUnionTypes
-from core.prompt.utils.extract_thread_messages import extract_thread_messages
-from extensions.ext_database import db
-from factories import file_factory
+from graphon.model_runtime.entities.message_entities import PromptMessageContentUnionTypes
 from models.model import AppMode, Conversation, Message, MessageFile
-from models.workflow import Workflow, WorkflowRun
+from models.workflow import Workflow
+from repositories.api_workflow_run_repository import APIWorkflowRunRepository
+from repositories.factory import DifyAPIRepositoryFactory
+
+_file_access_controller = DatabaseFileAccessController()
 
 
 class TokenBufferMemory:
@@ -30,38 +35,62 @@ class TokenBufferMemory:
     ):
         self.conversation = conversation
         self.model_instance = model_instance
+        self._workflow_run_repo: APIWorkflowRunRepository | None = None
+
+    @property
+    def workflow_run_repo(self) -> APIWorkflowRunRepository:
+        if self._workflow_run_repo is None:
+            session_maker = sessionmaker(bind=db.engine, expire_on_commit=False)
+            self._workflow_run_repo = DifyAPIRepositoryFactory.create_api_workflow_run_repository(session_maker)
+        return self._workflow_run_repo
 
     def _build_prompt_message_with_files(
-        self, message_files: list[MessageFile], text_content: str, message: Message, app_record, is_user_message: bool
+        self,
+        message_files: Sequence[MessageFile],
+        text_content: str,
+        message: Message,
+        app_record,
+        is_user_message: bool,
     ) -> PromptMessage:
         """
         Build prompt message with files.
-        :param message_files: list of MessageFile objects
+        :param message_files: Sequence of MessageFile objects
         :param text_content: text content of the message
         :param message: Message object
         :param app_record: app record
         :param is_user_message: whether this is a user message
         :return: PromptMessage
         """
-        if self.conversation.mode in {AppMode.AGENT_CHAT, AppMode.COMPLETION, AppMode.CHAT}:
-            file_extra_config = FileUploadConfigManager.convert(self.conversation.model_config)
-        elif self.conversation.mode in {AppMode.ADVANCED_CHAT, AppMode.WORKFLOW}:
-            workflow_run = db.session.scalar(select(WorkflowRun).where(WorkflowRun.id == message.workflow_run_id))
-            if not workflow_run:
-                raise ValueError(f"Workflow run not found: {message.workflow_run_id}")
-            workflow = db.session.scalar(select(Workflow).where(Workflow.id == workflow_run.workflow_id))
-            if not workflow:
-                raise ValueError(f"Workflow not found: {workflow_run.workflow_id}")
-            file_extra_config = FileUploadConfigManager.convert(workflow.features_dict, is_vision=False)
-        else:
-            raise AssertionError(f"Invalid app mode: {self.conversation.mode}")
+        match self.conversation.mode:
+            case AppMode.AGENT_CHAT | AppMode.COMPLETION | AppMode.CHAT:
+                file_extra_config = FileUploadConfigManager.convert(self.conversation.model_config)
+            case AppMode.ADVANCED_CHAT | AppMode.WORKFLOW:
+                app = self.conversation.app
+                if not app:
+                    raise ValueError("App not found for conversation")
+
+                if not message.workflow_run_id:
+                    raise ValueError("Workflow run ID not found")
+
+                workflow_run = self.workflow_run_repo.get_workflow_run_by_id(
+                    tenant_id=app.tenant_id, app_id=app.id, run_id=message.workflow_run_id
+                )
+                if not workflow_run:
+                    raise ValueError(f"Workflow run not found: {message.workflow_run_id}")
+                workflow = db.session.scalar(select(Workflow).where(Workflow.id == workflow_run.workflow_id))
+                if not workflow:
+                    raise ValueError(f"Workflow not found: {workflow_run.workflow_id}")
+                file_extra_config = FileUploadConfigManager.convert(workflow.features_dict, is_vision=False)
+            case _:
+                raise AssertionError(f"Invalid app mode: {self.conversation.mode}")
 
         detail = ImagePromptMessageContent.DETAIL.HIGH
         if file_extra_config and app_record:
-            # Build files directly without filtering by belongs_to
             file_objs = [
                 file_factory.build_from_message_file(
-                    message_file=message_file, tenant_id=app_record.tenant_id, config=file_extra_config
+                    message_file=message_file,
+                    tenant_id=app_record.tenant_id,
+                    access_controller=_file_access_controller,
                 )
                 for message_file in message_files
             ]
@@ -91,7 +120,7 @@ class TokenBufferMemory:
                 return AssistantPromptMessage(content=prompt_message_contents)
 
     def get_history_prompt_messages(
-        self, max_token_limit: int = 2000, message_limit: Optional[int] = None
+        self, max_token_limit: int = 2000, message_limit: int | None = None
     ) -> Sequence[PromptMessage]:
         """
         Get history prompt messages.
@@ -124,17 +153,16 @@ class TokenBufferMemory:
 
         messages = list(reversed(thread_messages))
 
+        curr_message_tokens = 0
         prompt_messages: list[PromptMessage] = []
         for message in messages:
             # Process user message with files
-            user_files = (
-                db.session.query(MessageFile)
-                .where(
+            user_files = db.session.scalars(
+                select(MessageFile).where(
                     MessageFile.message_id == message.id,
                     (MessageFile.belongs_to == "user") | (MessageFile.belongs_to.is_(None)),
                 )
-                .all()
-            )
+            ).all()
 
             if user_files:
                 user_prompt_message = self._build_prompt_message_with_files(
@@ -149,11 +177,9 @@ class TokenBufferMemory:
                 prompt_messages.append(UserPromptMessage(content=message.query))
 
             # Process assistant message with files
-            assistant_files = (
-                db.session.query(MessageFile)
-                .where(MessageFile.message_id == message.id, MessageFile.belongs_to == "assistant")
-                .all()
-            )
+            assistant_files = db.session.scalars(
+                select(MessageFile).where(MessageFile.message_id == message.id, MessageFile.belongs_to == "assistant")
+            ).all()
 
             if assistant_files:
                 assistant_prompt_message = self._build_prompt_message_with_files(
@@ -185,7 +211,7 @@ class TokenBufferMemory:
         human_prefix: str = "Human",
         ai_prefix: str = "Assistant",
         max_token_limit: int = 2000,
-        message_limit: Optional[int] = None,
+        message_limit: int | None = None,
     ) -> str:
         """
         Get history prompt text.
@@ -209,10 +235,11 @@ class TokenBufferMemory:
             if isinstance(m.content, list):
                 inner_msg = ""
                 for content in m.content:
-                    if isinstance(content, TextPromptMessageContent):
-                        inner_msg += f"{content.data}\n"
-                    elif isinstance(content, ImagePromptMessageContent):
-                        inner_msg += "[image]\n"
+                    match content:
+                        case TextPromptMessageContent():
+                            inner_msg += f"{content.data}\n"
+                        case ImagePromptMessageContent():
+                            inner_msg += "[image]\n"
 
                 string_messages.append(f"{role}: {inner_msg.strip()}")
             else:

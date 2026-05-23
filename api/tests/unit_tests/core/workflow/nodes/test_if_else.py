@@ -4,34 +4,43 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from core.app.entities.app_invoke_entities import InvokeFrom
-from core.file import File, FileTransferMethod, FileType
-from core.variables import ArrayFileSegment
-from core.workflow.entities.variable_pool import VariablePool
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionStatus
-from core.workflow.graph_engine.entities.graph import Graph
-from core.workflow.graph_engine.entities.graph_init_params import GraphInitParams
-from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
-from core.workflow.nodes.if_else.entities import IfElseNodeData
-from core.workflow.nodes.if_else.if_else_node import IfElseNode
-from core.workflow.system_variable import SystemVariable
-from core.workflow.utils.condition.entities import Condition, SubCondition, SubVariableCondition
+from core.app.entities.app_invoke_entities import DIFY_RUN_CONTEXT_KEY, InvokeFrom, UserFrom
+from core.workflow.node_factory import DifyNodeFactory
+from core.workflow.system_variables import build_system_variables
 from extensions.ext_database import db
-from models.enums import UserFrom
-from models.workflow import WorkflowType
+from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.file import File, FileTransferMethod, FileType
+from graphon.graph import Graph
+from graphon.nodes.if_else.entities import IfElseNodeData
+from graphon.nodes.if_else.if_else_node import IfElseNode
+from graphon.runtime import GraphRuntimeState, VariablePool
+from graphon.utils.condition.entities import Condition, SubCondition, SubVariableCondition
+from graphon.variables import ArrayFileSegment
+from tests.workflow_test_utils import build_test_graph_init_params
+
+
+def _build_if_else_node(
+    *,
+    node_data: IfElseNodeData | dict[str, object],
+    init_params,
+    graph_runtime_state,
+) -> IfElseNode:
+    return IfElseNode(
+        node_id=str(uuid.uuid4()),
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+        data=node_data if isinstance(node_data, IfElseNodeData) else IfElseNodeData.model_validate(node_data),
+    )
 
 
 def test_execute_if_else_result_true():
-    graph_config = {"edges": [], "nodes": [{"data": {"type": "start"}, "id": "start"}]}
+    graph_config = {"edges": [], "nodes": [{"data": {"type": "start", "title": "Start"}, "id": "start"}]}
 
-    graph = Graph.init(graph_config=graph_config)
-
-    init_params = GraphInitParams(
-        tenant_id="1",
-        app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
+    init_params = build_test_graph_init_params(
         workflow_id="1",
         graph_config=graph_config,
+        tenant_id="1",
+        app_id="1",
         user_id="1",
         user_from=UserFrom.ACCOUNT,
         invoke_from=InvokeFrom.DEBUGGER,
@@ -39,7 +48,10 @@ def test_execute_if_else_result_true():
     )
 
     # construct variable pool
-    pool = VariablePool(system_variables=SystemVariable(user_id="aaa", files=[]), user_inputs={})
+    pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(user_id="aaa", files=[]),
+        user_inputs={},
+    )
     pool.add(["start", "array_contains"], ["ab", "def"])
     pool.add(["start", "array_not_contains"], ["ac", "def"])
     pool.add(["start", "contains"], "cabcde")
@@ -59,9 +71,15 @@ def test_execute_if_else_result_true():
     pool.add(["start", "null"], None)
     pool.add(["start", "not_null"], "1212")
 
-    node_config = {
-        "id": "if-else",
-        "data": {
+    graph_runtime_state = GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter())
+    node_factory = DifyNodeFactory(
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+    )
+    graph = Graph.init(graph_config=graph_config, node_factory=node_factory, root_node_id="start")
+
+    node = _build_if_else_node(
+        node_data={
             "title": "123",
             "type": "if-else",
             "logical_operator": "and",
@@ -102,18 +120,9 @@ def test_execute_if_else_result_true():
                 {"comparison_operator": "not null", "variable_selector": ["start", "not_null"]},
             ],
         },
-    }
-
-    node = IfElseNode(
-        id=str(uuid.uuid4()),
-        graph_init_params=init_params,
-        graph=graph,
-        graph_runtime_state=GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter()),
-        config=node_config,
+        init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
     )
-
-    # Initialize node data
-    node.init_node_data(node_config["data"])
 
     # Mock db.session.close()
     db.session.close = MagicMock()
@@ -127,33 +136,14 @@ def test_execute_if_else_result_true():
 
 
 def test_execute_if_else_result_false():
-    graph_config = {
-        "edges": [
-            {
-                "id": "start-source-llm-target",
-                "source": "start",
-                "target": "llm",
-            },
-        ],
-        "nodes": [
-            {"data": {"type": "start"}, "id": "start"},
-            {
-                "data": {
-                    "type": "llm",
-                },
-                "id": "llm",
-            },
-        ],
-    }
+    # Create a simple graph for IfElse node testing
+    graph_config = {"edges": [], "nodes": [{"data": {"type": "start", "title": "Start"}, "id": "start"}]}
 
-    graph = Graph.init(graph_config=graph_config)
-
-    init_params = GraphInitParams(
-        tenant_id="1",
-        app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
+    init_params = build_test_graph_init_params(
         workflow_id="1",
         graph_config=graph_config,
+        tenant_id="1",
+        app_id="1",
         user_id="1",
         user_from=UserFrom.ACCOUNT,
         invoke_from=InvokeFrom.DEBUGGER,
@@ -161,17 +151,23 @@ def test_execute_if_else_result_false():
     )
 
     # construct variable pool
-    pool = VariablePool(
-        system_variables=SystemVariable(user_id="aaa", files=[]),
+    pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(user_id="aaa", files=[]),
         user_inputs={},
         environment_variables=[],
     )
     pool.add(["start", "array_contains"], ["1ab", "def"])
     pool.add(["start", "array_not_contains"], ["ab", "def"])
 
-    node_config = {
-        "id": "if-else",
-        "data": {
+    graph_runtime_state = GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter())
+    node_factory = DifyNodeFactory(
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+    )
+    graph = Graph.init(graph_config=graph_config, node_factory=node_factory, root_node_id="start")
+
+    node = _build_if_else_node(
+        node_data={
             "title": "123",
             "type": "if-else",
             "logical_operator": "or",
@@ -188,18 +184,9 @@ def test_execute_if_else_result_false():
                 },
             ],
         },
-    }
-
-    node = IfElseNode(
-        id=str(uuid.uuid4()),
-        graph_init_params=init_params,
-        graph=graph,
-        graph_runtime_state=GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter()),
-        config=node_config,
+        init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
     )
-
-    # Initialize node data
-    node.init_node_data(node_config["data"])
 
     # Mock db.session.close()
     db.session.close = MagicMock()
@@ -240,27 +227,27 @@ def test_array_file_contains_file_name():
         ],
     )
 
-    node_config = {
-        "id": "if-else",
-        "data": node_data.model_dump(),
+    # Create properly configured mock for graph_init_params
+    graph_init_params = Mock()
+    graph_init_params.workflow_id = "test_workflow"
+    graph_init_params.graph_config = {}
+    graph_init_params.call_depth = 0
+    graph_init_params.run_context = {
+        DIFY_RUN_CONTEXT_KEY: {
+            "tenant_id": "test_tenant",
+            "app_id": "test_app",
+            "user_id": "test_user",
+            "user_from": UserFrom.ACCOUNT,
+            "invoke_from": InvokeFrom.SERVICE_API,
+        }
     }
 
-    node = IfElseNode(
-        id=str(uuid.uuid4()),
-        graph_init_params=Mock(),
-        graph=Mock(),
-        graph_runtime_state=Mock(),
-        config=node_config,
-    )
-
-    # Initialize node data
-    node.init_node_data(node_config["data"])
+    node = _build_if_else_node(node_data=node_data, init_params=graph_init_params, graph_runtime_state=Mock())
 
     node.graph_runtime_state.variable_pool.get.return_value = ArrayFileSegment(
         value=[
             File(
-                tenant_id="1",
-                type=FileType.IMAGE,
+                file_type=FileType.IMAGE,
                 transfer_method=FileTransferMethod.LOCAL_FILE,
                 related_id="1",
                 filename="ab",
@@ -307,16 +294,13 @@ def _get_condition_test_id(c: Condition):
 @pytest.mark.parametrize("condition", _get_test_conditions(), ids=_get_condition_test_id)
 def test_execute_if_else_boolean_conditions(condition: Condition):
     """Test IfElseNode with boolean conditions using various operators"""
-    graph_config = {"edges": [], "nodes": [{"data": {"type": "start"}, "id": "start"}]}
+    graph_config = {"edges": [], "nodes": [{"data": {"type": "start", "title": "Start"}, "id": "start"}]}
 
-    graph = Graph.init(graph_config=graph_config)
-
-    init_params = GraphInitParams(
-        tenant_id="1",
-        app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
+    init_params = build_test_graph_init_params(
         workflow_id="1",
         graph_config=graph_config,
+        tenant_id="1",
+        app_id="1",
         user_id="1",
         user_from=UserFrom.ACCOUNT,
         invoke_from=InvokeFrom.DEBUGGER,
@@ -324,13 +308,20 @@ def test_execute_if_else_boolean_conditions(condition: Condition):
     )
 
     # construct variable pool with boolean values
-    pool = VariablePool(
-        system_variables=SystemVariable(files=[], user_id="aaa"),
+    pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(files=[], user_id="aaa"),
     )
     pool.add(["start", "bool_true"], True)
     pool.add(["start", "bool_false"], False)
     pool.add(["start", "bool_array"], [True, False, True])
     pool.add(["start", "mixed_array"], [True, "false", 1, 0])
+
+    graph_runtime_state = GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter())
+    node_factory = DifyNodeFactory(
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+    )
+    graph = Graph.init(graph_config=graph_config, node_factory=node_factory, root_node_id="start")
 
     node_data = {
         "title": "Boolean Test",
@@ -338,14 +329,11 @@ def test_execute_if_else_boolean_conditions(condition: Condition):
         "logical_operator": "and",
         "conditions": [condition.model_dump()],
     }
-    node = IfElseNode(
-        id=str(uuid.uuid4()),
-        graph_init_params=init_params,
-        graph=graph,
-        graph_runtime_state=GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter()),
-        config={"id": "if-else", "data": node_data},
+    node = _build_if_else_node(
+        node_data=node_data,
+        init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
     )
-    node.init_node_data(node_data)
 
     # Mock db.session.close()
     db.session.close = MagicMock()
@@ -360,16 +348,13 @@ def test_execute_if_else_boolean_conditions(condition: Condition):
 
 def test_execute_if_else_boolean_false_conditions():
     """Test IfElseNode with boolean conditions that should evaluate to false"""
-    graph_config = {"edges": [], "nodes": [{"data": {"type": "start"}, "id": "start"}]}
+    graph_config = {"edges": [], "nodes": [{"data": {"type": "start", "title": "Start"}, "id": "start"}]}
 
-    graph = Graph.init(graph_config=graph_config)
-
-    init_params = GraphInitParams(
-        tenant_id="1",
-        app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
+    init_params = build_test_graph_init_params(
         workflow_id="1",
         graph_config=graph_config,
+        tenant_id="1",
+        app_id="1",
         user_id="1",
         user_from=UserFrom.ACCOUNT,
         invoke_from=InvokeFrom.DEBUGGER,
@@ -377,12 +362,19 @@ def test_execute_if_else_boolean_false_conditions():
     )
 
     # construct variable pool with boolean values
-    pool = VariablePool(
-        system_variables=SystemVariable(files=[], user_id="aaa"),
+    pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(files=[], user_id="aaa"),
     )
     pool.add(["start", "bool_true"], True)
     pool.add(["start", "bool_false"], False)
     pool.add(["start", "bool_array"], [True, False, True])
+
+    graph_runtime_state = GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter())
+    node_factory = DifyNodeFactory(
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+    )
+    graph = Graph.init(graph_config=graph_config, node_factory=node_factory, root_node_id="start")
 
     node_data = {
         "title": "Boolean False Test",
@@ -402,17 +394,11 @@ def test_execute_if_else_boolean_false_conditions():
         ],
     }
 
-    node = IfElseNode(
-        id=str(uuid.uuid4()),
-        graph_init_params=init_params,
-        graph=graph,
-        graph_runtime_state=GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter()),
-        config={
-            "id": "if-else",
-            "data": node_data,
-        },
+    node = _build_if_else_node(
+        node_data=node_data,
+        init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
     )
-    node.init_node_data(node_data)
 
     # Mock db.session.close()
     db.session.close = MagicMock()
@@ -427,16 +413,13 @@ def test_execute_if_else_boolean_false_conditions():
 
 def test_execute_if_else_boolean_cases_structure():
     """Test IfElseNode with boolean conditions using the new cases structure"""
-    graph_config = {"edges": [], "nodes": [{"data": {"type": "start"}, "id": "start"}]}
+    graph_config = {"edges": [], "nodes": [{"data": {"type": "start", "title": "Start"}, "id": "start"}]}
 
-    graph = Graph.init(graph_config=graph_config)
-
-    init_params = GraphInitParams(
-        tenant_id="1",
-        app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
+    init_params = build_test_graph_init_params(
         workflow_id="1",
         graph_config=graph_config,
+        tenant_id="1",
+        app_id="1",
         user_id="1",
         user_from=UserFrom.ACCOUNT,
         invoke_from=InvokeFrom.DEBUGGER,
@@ -444,11 +427,18 @@ def test_execute_if_else_boolean_cases_structure():
     )
 
     # construct variable pool with boolean values
-    pool = VariablePool(
-        system_variables=SystemVariable(files=[], user_id="aaa"),
+    pool = VariablePool.from_bootstrap(
+        system_variables=build_system_variables(files=[], user_id="aaa"),
     )
     pool.add(["start", "bool_true"], True)
     pool.add(["start", "bool_false"], False)
+
+    graph_runtime_state = GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter())
+    node_factory = DifyNodeFactory(
+        graph_init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
+    )
+    graph = Graph.init(graph_config=graph_config, node_factory=node_factory, root_node_id="start")
 
     node_data = {
         "title": "Boolean Cases Test",
@@ -472,14 +462,11 @@ def test_execute_if_else_boolean_cases_structure():
             }
         ],
     }
-    node = IfElseNode(
-        id=str(uuid.uuid4()),
-        graph_init_params=init_params,
-        graph=graph,
-        graph_runtime_state=GraphRuntimeState(variable_pool=pool, start_at=time.perf_counter()),
-        config={"id": "if-else", "data": node_data},
+    node = _build_if_else_node(
+        node_data=node_data,
+        init_params=init_params,
+        graph_runtime_state=graph_runtime_state,
     )
-    node.init_node_data(node_data)
 
     # Mock db.session.close()
     db.session.close = MagicMock()
