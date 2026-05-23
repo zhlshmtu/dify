@@ -4,12 +4,15 @@ Proxy requests to avoid SSRF
 
 import logging
 import time
+from typing import Any
 
 import httpx
+from pydantic import TypeAdapter, ValidationError
 
 from configs import dify_config
 from core.helper.http_client_pooling import get_pooled_http_client
 from core.tools.errors import ToolSSRFError
+from graphon.http.response import HttpResponse
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,9 @@ SSRF_DEFAULT_MAX_RETRIES = dify_config.SSRF_DEFAULT_MAX_RETRIES
 
 BACKOFF_FACTOR = 0.5
 STATUS_FORCELIST = [429, 500, 502, 503, 504]
+
+type Headers = dict[str, str]
+_HEADERS_ADAPTER: TypeAdapter[Headers] = TypeAdapter(Headers)
 
 _SSL_VERIFIED_POOL_KEY = "ssrf:verified"
 _SSL_UNVERIFIED_POOL_KEY = "ssrf:unverified"
@@ -37,13 +43,16 @@ request_error = httpx.RequestError
 max_retries_exceeded_error = MaxRetriesExceededError
 
 
-def _create_proxy_mounts() -> dict[str, httpx.HTTPTransport]:
+def _create_proxy_mounts(verify: bool) -> dict[str, httpx.HTTPTransport]:
+    """Build per-scheme proxy transports with the same TLS policy as the SSRF client."""
     return {
         "http://": httpx.HTTPTransport(
             proxy=dify_config.SSRF_PROXY_HTTP_URL,
+            verify=verify,
         ),
         "https://": httpx.HTTPTransport(
             proxy=dify_config.SSRF_PROXY_HTTPS_URL,
+            verify=verify,
         ),
     }
 
@@ -58,7 +67,7 @@ def _build_ssrf_client(verify: bool) -> httpx.Client:
 
     if dify_config.SSRF_PROXY_HTTP_URL and dify_config.SSRF_PROXY_HTTPS_URL:
         return httpx.Client(
-            mounts=_create_proxy_mounts(),
+            mounts=_create_proxy_mounts(verify=verify),
             verify=verify,
             limits=_SSRF_CLIENT_LIMITS,
         )
@@ -76,7 +85,7 @@ def _get_ssrf_client(ssl_verify_enabled: bool) -> httpx.Client:
     )
 
 
-def _get_user_provided_host_header(headers: dict | None) -> str | None:
+def _get_user_provided_host_header(headers: Headers | None) -> str | None:
     """
     Extract the user-provided Host header from the headers dict.
 
@@ -92,7 +101,7 @@ def _get_user_provided_host_header(headers: dict | None) -> str | None:
     return None
 
 
-def _inject_trace_headers(headers: dict | None) -> dict:
+def _inject_trace_headers(headers: Headers | None) -> Headers:
     """
     Inject W3C traceparent header for distributed tracing.
 
@@ -125,7 +134,7 @@ def _inject_trace_headers(headers: dict | None) -> dict:
     return headers
 
 
-def make_request(method, url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
+def make_request(method: str, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
     # Convert requests-style allow_redirects to httpx-style follow_redirects
     if "allow_redirects" in kwargs:
         allow_redirects = kwargs.pop("allow_redirects")
@@ -142,10 +151,15 @@ def make_request(method, url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
 
     # prioritize per-call option, which can be switched on and off inside the HTTP node on the web UI
     verify_option = kwargs.pop("ssl_verify", dify_config.HTTP_REQUEST_NODE_SSL_VERIFY)
+    if not isinstance(verify_option, bool):
+        raise ValueError("ssl_verify must be a boolean")
     client = _get_ssrf_client(verify_option)
 
     # Inject traceparent header for distributed tracing (when OTEL is not enabled)
-    headers = kwargs.get("headers") or {}
+    try:
+        headers: Headers = _HEADERS_ADAPTER.validate_python(kwargs.get("headers") or {})
+    except ValidationError as e:
+        raise ValueError("headers must be a mapping of string keys to string values") from e
     headers = _inject_trace_headers(headers)
     kwargs["headers"] = headers
 
@@ -198,25 +212,106 @@ def make_request(method, url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
     raise MaxRetriesExceededError(f"Reached maximum retries ({max_retries}) for URL {url}")
 
 
-def get(url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
+def get(url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
     return make_request("GET", url, max_retries=max_retries, **kwargs)
 
 
-def post(url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
+def post(url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
     return make_request("POST", url, max_retries=max_retries, **kwargs)
 
 
-def put(url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
+def put(url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
     return make_request("PUT", url, max_retries=max_retries, **kwargs)
 
 
-def patch(url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
+def patch(url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
     return make_request("PATCH", url, max_retries=max_retries, **kwargs)
 
 
-def delete(url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
+def delete(url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
     return make_request("DELETE", url, max_retries=max_retries, **kwargs)
 
 
-def head(url, max_retries=SSRF_DEFAULT_MAX_RETRIES, **kwargs):
+def head(url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
     return make_request("HEAD", url, max_retries=max_retries, **kwargs)
+
+
+class SSRFProxy:
+    """
+    Adapter exposing SSRF-protected HTTP helpers behind HttpClientProtocol.
+
+    This is intentionally a thin wrapper over the existing module-level functions so callers can inject it
+    where a protocol-typed HTTP client is expected.
+    """
+
+    @property
+    def max_retries_exceeded_error(self) -> type[Exception]:
+        return max_retries_exceeded_error
+
+    @property
+    def request_error(self) -> type[Exception]:
+        return request_error
+
+    def get(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
+        return get(url=url, max_retries=max_retries, **kwargs)
+
+    def head(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
+        return head(url=url, max_retries=max_retries, **kwargs)
+
+    def post(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
+        return post(url=url, max_retries=max_retries, **kwargs)
+
+    def put(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
+        return put(url=url, max_retries=max_retries, **kwargs)
+
+    def delete(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
+        return delete(url=url, max_retries=max_retries, **kwargs)
+
+    def patch(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> httpx.Response:
+        return patch(url=url, max_retries=max_retries, **kwargs)
+
+
+def _to_graphon_http_response(response: httpx.Response) -> HttpResponse:
+    """Convert an ``httpx`` response into Graphon's transport-agnostic wrapper."""
+    return HttpResponse(
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        content=response.content,
+        url=str(response.url) if response.url else None,
+        reason_phrase=response.reason_phrase,
+        fallback_text=response.text,
+    )
+
+
+class GraphonSSRFProxy:
+    """Adapter exposing SSRF helpers behind Graphon's ``HttpClientProtocol``."""
+
+    @property
+    def max_retries_exceeded_error(self) -> type[Exception]:
+        return max_retries_exceeded_error
+
+    @property
+    def request_error(self) -> type[Exception]:
+        return request_error
+
+    def get(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> HttpResponse:
+        return _to_graphon_http_response(get(url=url, max_retries=max_retries, **kwargs))
+
+    def head(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> HttpResponse:
+        return _to_graphon_http_response(head(url=url, max_retries=max_retries, **kwargs))
+
+    def post(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> HttpResponse:
+        return _to_graphon_http_response(post(url=url, max_retries=max_retries, **kwargs))
+
+    def put(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> HttpResponse:
+        return _to_graphon_http_response(put(url=url, max_retries=max_retries, **kwargs))
+
+    def delete(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> HttpResponse:
+        return _to_graphon_http_response(delete(url=url, max_retries=max_retries, **kwargs))
+
+    def patch(self, url: str, max_retries: int = SSRF_DEFAULT_MAX_RETRIES, **kwargs: Any) -> HttpResponse:
+        return _to_graphon_http_response(patch(url=url, max_retries=max_retries, **kwargs))
+
+
+ssrf_proxy = SSRFProxy()
+graphon_ssrf_proxy = GraphonSSRFProxy()

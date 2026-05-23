@@ -5,30 +5,32 @@ from flask import request
 from flask_restx import Resource
 from pydantic import BaseModel, Field, field_validator
 
+from controllers.common.fields import SimpleResultResponse
+from controllers.common.schema import register_enum_models, register_response_schema_models, register_schema_models
 from controllers.console import console_ns
 from controllers.console.wraps import account_initialization_required, is_admin_or_owner_required, setup_required
-from core.model_runtime.entities.model_entities import ModelType
-from core.model_runtime.errors.validate import CredentialsValidateFailedError
-from core.model_runtime.utils.encoders import jsonable_encoder
+from graphon.model_runtime.entities.model_entities import ModelType
+from graphon.model_runtime.errors.validate import CredentialsValidateFailedError
+from graphon.model_runtime.utils.encoders import jsonable_encoder
 from libs.helper import uuid_value
 from libs.login import current_account_with_tenant, login_required
 from services.model_load_balancing_service import ModelLoadBalancingService
 from services.model_provider_service import ModelProviderService
 
 logger = logging.getLogger(__name__)
-DEFAULT_REF_TEMPLATE_SWAGGER_2_0 = "#/definitions/{model}"
 
 
 class ParserGetDefault(BaseModel):
     model_type: ModelType
 
 
-class ParserPostDefault(BaseModel):
-    class Inner(BaseModel):
-        model_type: ModelType
-        model: str | None = None
-        provider: str | None = None
+class Inner(BaseModel):
+    model_type: ModelType
+    model: str | None = None
+    provider: str | None = None
 
+
+class ParserPostDefault(BaseModel):
     model_settings: list[Inner]
 
 
@@ -105,19 +107,29 @@ class ParserParameter(BaseModel):
     model: str
 
 
-def reg(cls: type[BaseModel]):
-    console_ns.schema_model(cls.__name__, cls.model_json_schema(ref_template=DEFAULT_REF_TEMPLATE_SWAGGER_2_0))
+class ParserSwitch(BaseModel):
+    model: str
+    model_type: ModelType
+    credential_id: str
 
 
-reg(ParserGetDefault)
-reg(ParserPostDefault)
-reg(ParserDeleteModels)
-reg(ParserPostModels)
-reg(ParserGetCredentials)
-reg(ParserCreateCredential)
-reg(ParserUpdateCredential)
-reg(ParserDeleteCredential)
-reg(ParserParameter)
+register_schema_models(
+    console_ns,
+    ParserGetDefault,
+    ParserPostDefault,
+    ParserDeleteModels,
+    ParserPostModels,
+    ParserGetCredentials,
+    ParserCreateCredential,
+    ParserUpdateCredential,
+    ParserDeleteCredential,
+    ParserParameter,
+    Inner,
+    ParserSwitch,
+)
+register_response_schema_models(console_ns, SimpleResultResponse)
+
+register_enum_models(console_ns, ModelType)
 
 
 @console_ns.route("/workspaces/current/default-model")
@@ -129,7 +141,7 @@ class DefaultModelApi(Resource):
     def get(self):
         _, tenant_id = current_account_with_tenant()
 
-        args = ParserGetDefault.model_validate(request.args.to_dict(flat=True))  # type: ignore
+        args = ParserGetDefault.model_validate(request.args.to_dict(flat=True))
 
         model_provider_service = ModelProviderService()
         default_model_entity = model_provider_service.get_default_model_of_model_type(
@@ -139,6 +151,7 @@ class DefaultModelApi(Resource):
         return jsonable_encoder({"data": default_model_entity})
 
     @console_ns.expect(console_ns.models[ParserPostDefault.__name__])
+    @console_ns.response(200, "Success", console_ns.models[SimpleResultResponse.__name__])
     @setup_required
     @login_required
     @is_admin_or_owner_required
@@ -231,6 +244,7 @@ class ModelProviderModelApi(Resource):
         return {"result": "success"}, 200
 
     @console_ns.expect(console_ns.models[ParserDeleteModels.__name__])
+    @console_ns.response(204, "Model deleted successfully")
     @setup_required
     @login_required
     @is_admin_or_owner_required
@@ -245,7 +259,7 @@ class ModelProviderModelApi(Resource):
             tenant_id=tenant_id, provider=provider, model=args.model, model_type=args.model_type
         )
 
-        return {"result": "success"}, 204
+        return "", 204
 
 
 @console_ns.route("/workspaces/current/model-providers/<path:provider>/models/credentials")
@@ -257,7 +271,7 @@ class ModelProviderModelCredentialApi(Resource):
     def get(self, provider: str):
         _, tenant_id = current_account_with_tenant()
 
-        args = ParserGetCredentials.model_validate(request.args.to_dict(flat=True))  # type: ignore
+        args = ParserGetCredentials.model_validate(request.args.to_dict(flat=True))
 
         model_provider_service = ModelProviderService()
         current_credential = model_provider_service.get_model_credential(
@@ -278,14 +292,16 @@ class ModelProviderModelCredentialApi(Resource):
         )
 
         if args.config_from == "predefined-model":
-            available_credentials = model_provider_service.provider_manager.get_provider_available_credentials(
-                tenant_id=tenant_id, provider_name=provider
+            available_credentials = model_provider_service.get_provider_available_credentials(
+                tenant_id=tenant_id,
+                provider=provider,
             )
         else:
-            # Normalize model_type to the origin value stored in DB (e.g., "text-generation" for LLM)
-            normalized_model_type = args.model_type.to_origin_model_type()
-            available_credentials = model_provider_service.provider_manager.get_provider_model_available_credentials(
-                tenant_id=tenant_id, provider_name=provider, model_type=normalized_model_type, model_name=args.model
+            available_credentials = model_provider_service.get_provider_model_available_credentials(
+                tenant_id=tenant_id,
+                provider=provider,
+                model_type=args.model_type,
+                model=args.model,
             )
 
         return jsonable_encoder(
@@ -361,6 +377,7 @@ class ModelProviderModelCredentialApi(Resource):
         return {"result": "success"}
 
     @console_ns.expect(console_ns.models[ParserDeleteCredential.__name__])
+    @console_ns.response(204, "Credential deleted successfully")
     @setup_required
     @login_required
     @is_admin_or_owner_required
@@ -378,23 +395,13 @@ class ModelProviderModelCredentialApi(Resource):
             credential_id=args.credential_id,
         )
 
-        return {"result": "success"}, 204
-
-
-class ParserSwitch(BaseModel):
-    model: str
-    model_type: ModelType
-    credential_id: str
-
-
-console_ns.schema_model(
-    ParserSwitch.__name__, ParserSwitch.model_json_schema(ref_template=DEFAULT_REF_TEMPLATE_SWAGGER_2_0)
-)
+        return "", 204
 
 
 @console_ns.route("/workspaces/current/model-providers/<path:provider>/models/credentials/switch")
 class ModelProviderModelCredentialSwitchApi(Resource):
     @console_ns.expect(console_ns.models[ParserSwitch.__name__])
+    @console_ns.response(200, "Success", console_ns.models[SimpleResultResponse.__name__])
     @setup_required
     @login_required
     @is_admin_or_owner_required
@@ -419,6 +426,7 @@ class ModelProviderModelCredentialSwitchApi(Resource):
 )
 class ModelProviderModelEnableApi(Resource):
     @console_ns.expect(console_ns.models[ParserDeleteModels.__name__])
+    @console_ns.response(200, "Success", console_ns.models[SimpleResultResponse.__name__])
     @setup_required
     @login_required
     @account_initialization_required
@@ -440,6 +448,7 @@ class ModelProviderModelEnableApi(Resource):
 )
 class ModelProviderModelDisableApi(Resource):
     @console_ns.expect(console_ns.models[ParserDeleteModels.__name__])
+    @console_ns.response(200, "Success", console_ns.models[SimpleResultResponse.__name__])
     @setup_required
     @login_required
     @account_initialization_required
@@ -459,12 +468,10 @@ class ModelProviderModelDisableApi(Resource):
 class ParserValidate(BaseModel):
     model: str
     model_type: ModelType
-    credentials: dict
+    credentials: dict[str, Any]
 
 
-console_ns.schema_model(
-    ParserValidate.__name__, ParserValidate.model_json_schema(ref_template=DEFAULT_REF_TEMPLATE_SWAGGER_2_0)
-)
+register_schema_models(console_ns, ParserSwitch, ParserValidate)
 
 
 @console_ns.route("/workspaces/current/model-providers/<path:provider>/models/credentials/validate")
@@ -509,7 +516,7 @@ class ModelProviderModelParameterRuleApi(Resource):
     @login_required
     @account_initialization_required
     def get(self, provider: str):
-        args = ParserParameter.model_validate(request.args.to_dict(flat=True))  # type: ignore
+        args = ParserParameter.model_validate(request.args.to_dict(flat=True))
         _, tenant_id = current_account_with_tenant()
 
         model_provider_service = ModelProviderService()

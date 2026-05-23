@@ -1,9 +1,9 @@
-import type { Meta, StoryObj } from '@storybook/nextjs'
+/// <reference types="vite/client" />
+import type { Meta, StoryObj } from '@storybook/nextjs-vite'
 import * as React from 'react'
 
-declare const require: any
-
 type IconComponent = React.ComponentType<Record<string, unknown>>
+type IconModule = { default: IconComponent }
 
 type IconEntry = {
   name: string
@@ -12,18 +12,16 @@ type IconEntry = {
   Component: IconComponent
 }
 
-const iconContext = require.context('./src', true, /\.tsx$/)
+const iconModules: Record<string, IconModule> = import.meta.glob('./src/**/*.tsx', { eager: true })
 
-const iconEntries: IconEntry[] = iconContext
-  .keys()
-  .filter((key: string) => !key.endsWith('.stories.tsx') && !key.endsWith('.spec.tsx'))
-  .map((key: string) => {
-    const mod = iconContext(key)
-    const Component = mod.default as IconComponent | undefined
+const iconEntries: IconEntry[] = Object.entries(iconModules)
+  .filter(([key]) => !key.endsWith('.stories.tsx') && !key.endsWith('.spec.tsx'))
+  .map(([key, mod]) => {
+    const Component = mod.default
     if (!Component)
       return null
 
-    const relativePath = key.replace(/^\.\//, '')
+    const relativePath = key.replace(/^\.\/src\//, '')
     const path = `app/components/base/icons/src/${relativePath}`
     const parts = relativePath.split('/')
     const fileName = parts.pop() || ''
@@ -61,7 +59,7 @@ const groupByCategory = (entries: IconEntry[]) => entries.reduce((acc, entry) =>
   if (!acc[entry.category])
     acc[entry.category] = []
 
-  acc[entry.category].push(entry)
+  acc[entry.category]!.push(entry)
   return acc
 }, {} as Record<string, IconEntry[]>)
 
@@ -223,7 +221,7 @@ const IconGalleryStory = () => {
         <section key={category} style={sectionStyle}>
           <h2 style={{ margin: 0, fontSize: 18 }}>{category}</h2>
           <div style={gridStyle}>
-            {grouped[category].map(entry => (
+            {grouped[category]!.map(entry => (
               <div key={entry.path} style={cardStyle}>
                 <div
                   style={{

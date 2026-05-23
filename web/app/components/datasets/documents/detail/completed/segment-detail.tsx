@@ -1,12 +1,11 @@
-import type { FC } from 'react'
 import type { FileEntity } from '@/app/components/datasets/common/image-uploader/types'
 import type { SegmentDetailModel } from '@/models/datasets'
+import { cn } from '@langgenius/dify-ui/cn'
 import {
   RiCloseLine,
   RiCollapseDiagonalLine,
   RiExpandDiagonalLine,
 } from '@remixicon/react'
-import * as React from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { v4 as uuid4 } from 'uuid'
@@ -16,7 +15,6 @@ import { IndexingType } from '@/app/components/datasets/create/step-two'
 import { useDatasetDetailContextWithSelector } from '@/context/dataset-detail'
 import { useEventEmitterContextContext } from '@/context/event-emitter'
 import { ChunkingMode } from '@/models/datasets'
-import { cn } from '@/utils/classnames'
 import { formatNumber } from '@/utils/format'
 import { useDocumentContext } from '../context'
 import ActionButtons from './common/action-buttons'
@@ -25,6 +23,7 @@ import Dot from './common/dot'
 import Keywords from './common/keywords'
 import RegenerationModal from './common/regeneration-modal'
 import { SegmentIndexTag } from './common/segment-index-tag'
+import SummaryText from './common/summary-text'
 import { useSegmentListContext } from './index'
 
 type ISegmentDetailProps = {
@@ -35,28 +34,25 @@ type ISegmentDetailProps = {
     a: string,
     k: string[],
     attachments: FileEntity[],
+    summary?: string,
     needRegenerate?: boolean,
   ) => void
   onCancel: () => void
   isEditMode?: boolean
   docForm: ChunkingMode
-  onModalStateChange?: (isOpen: boolean) => void
 }
 
-/**
- * Show all the contents of the segment
- */
-const SegmentDetail: FC<ISegmentDetailProps> = ({
+export function SegmentDetail({
   segInfo,
   onUpdate,
   onCancel,
   isEditMode,
   docForm,
-  onModalStateChange,
-}) => {
+}: ISegmentDetailProps) {
   const { t } = useTranslation()
   const [question, setQuestion] = useState(isEditMode ? segInfo?.content || '' : segInfo?.sign_content || '')
   const [answer, setAnswer] = useState(segInfo?.answer || '')
+  const [summary, setSummary] = useState(segInfo?.summary || '')
   const [attachments, setAttachments] = useState<FileEntity[]>(() => {
     return segInfo?.attachments?.map(item => ({
       id: uuid4(),
@@ -91,28 +87,25 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
   }, [onCancel])
 
   const handleSave = useCallback(() => {
-    onUpdate(segInfo?.id || '', question, answer, keywords, attachments)
-  }, [onUpdate, segInfo?.id, question, answer, keywords, attachments])
+    onUpdate(segInfo?.id || '', question, answer, keywords, attachments, summary, false)
+  }, [onUpdate, segInfo?.id, question, answer, keywords, attachments, summary])
 
   const handleRegeneration = useCallback(() => {
     setShowRegenerationModal(true)
-    onModalStateChange?.(true)
-  }, [onModalStateChange])
+  }, [])
 
   const onCancelRegeneration = useCallback(() => {
     setShowRegenerationModal(false)
-    onModalStateChange?.(false)
-  }, [onModalStateChange])
+  }, [])
 
   const onCloseAfterRegeneration = useCallback(() => {
     setShowRegenerationModal(false)
-    onModalStateChange?.(false)
-    onCancel() // Close the edit drawer
-  }, [onCancel, onModalStateChange])
+    onCancel()
+  }, [onCancel])
 
   const onConfirmRegeneration = useCallback(() => {
-    onUpdate(segInfo?.id || '', question, answer, keywords, attachments, true)
-  }, [onUpdate, segInfo?.id, question, answer, keywords, attachments])
+    onUpdate(segInfo?.id || '', question, answer, keywords, attachments, summary, true)
+  }, [onUpdate, segInfo?.id, question, answer, keywords, attachments, summary])
 
   const onAttachmentsChange = useCallback((attachments: FileEntity[]) => {
     setAttachments(attachments)
@@ -134,7 +127,7 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
     <div className="flex h-full flex-col">
       <div className={cn(
         'flex shrink-0 items-center justify-between',
-        fullScreen ? 'border border-divider-subtle py-3 pl-6 pr-4' : 'pl-4 pr-3 pt-3',
+        fullScreen ? 'border border-divider-subtle py-3 pr-4 pl-6' : 'pt-3 pr-3 pl-4',
       )}
       >
         <div className="flex flex-col">
@@ -155,19 +148,29 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
                 loading={loading}
                 showRegenerationButton={runtimeMode === 'general'}
               />
-              <Divider type="vertical" className="ml-4 mr-2 h-3.5 bg-divider-regular" />
+              <Divider type="vertical" className="mr-2 ml-4 h-3.5 bg-divider-regular" />
             </>
           )}
-          <div className="mr-1 flex h-8 w-8 cursor-pointer items-center justify-center p-1.5" onClick={toggleFullScreen}>
+          <button
+            type="button"
+            aria-label={t(fullScreen ? 'operation.zoomOut' : 'operation.zoomIn', { ns: 'common' })}
+            className="mr-1 flex size-8 cursor-pointer items-center justify-center border-none bg-transparent p-1.5"
+            onClick={toggleFullScreen}
+          >
             {
               fullScreen
-                ? <RiCollapseDiagonalLine className="h-4 w-4 text-text-tertiary" />
-                : <RiExpandDiagonalLine className="h-4 w-4 text-text-tertiary" />
+                ? <RiCollapseDiagonalLine className="size-4 text-text-tertiary" aria-hidden="true" />
+                : <RiExpandDiagonalLine className="size-4 text-text-tertiary" aria-hidden="true" />
             }
-          </div>
-          <div className="flex h-8 w-8 cursor-pointer items-center justify-center p-1.5" onClick={onCancel}>
-            <RiCloseLine className="h-4 w-4 text-text-tertiary" />
-          </div>
+          </button>
+          <button
+            type="button"
+            aria-label={t('operation.close', { ns: 'common' })}
+            className="flex size-8 cursor-pointer items-center justify-center border-none bg-transparent p-1.5"
+            onClick={onCancel}
+          >
+            <RiCloseLine className="size-4 text-text-tertiary" aria-hidden="true" />
+          </button>
         </div>
       </div>
       <div className={cn(
@@ -177,7 +180,7 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
       )}
       >
         <div className={cn(
-          isEditMode ? 'overflow-hidden whitespace-pre-line break-all' : 'overflow-y-auto',
+          isEditMode ? 'overflow-hidden break-all whitespace-pre-line' : 'overflow-y-auto',
           fullScreen ? 'w-1/2' : 'h-0 grow',
         )}
         >
@@ -197,6 +200,11 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
             value={attachments}
             onChange={onAttachmentsChange}
           />
+          <SummaryText
+            value={summary}
+            onChange={summary => setSummary(summary)}
+            disabled={!isEditMode}
+          />
           {isECOIndexing && (
             <Keywords
               className="w-full"
@@ -210,7 +218,7 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
         </div>
       </div>
       {isEditMode && !fullScreen && (
-        <div className="flex items-center justify-end border-t-[1px] border-t-divider-subtle p-4 pt-3">
+        <div className="flex items-center justify-end border-t border-t-divider-subtle p-4 pt-3">
           <ActionButtons
             handleCancel={handleCancel}
             handleRegeneration={handleRegeneration}
@@ -233,5 +241,3 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
     </div>
   )
 }
-
-export default React.memo(SegmentDetail)

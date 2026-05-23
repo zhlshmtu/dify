@@ -1,8 +1,11 @@
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 
 class PreviewDetail(BaseModel):
     content: str
+    summary: str | None = None
     child_chunks: list[str] | None = None
 
 
@@ -36,7 +39,7 @@ class PipelineDocument(BaseModel):
     id: str
     position: int
     data_source_type: str
-    data_source_info: dict | None = None
+    data_source_info: dict[str, Any] | None = None
     name: str
     indexing_status: str
     error: str | None = None

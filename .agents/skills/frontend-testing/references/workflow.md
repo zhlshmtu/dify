@@ -4,7 +4,7 @@ This guide defines the workflow for generating tests, especially for complex com
 
 ## Scope Clarification
 
-This guide addresses **multi-file workflow** (how to process multiple test files). For coverage requirements within a single test file, see `web/testing/testing.md` § Coverage Goals.
+This guide addresses **multi-file workflow** (how to process multiple test files). For coverage requirements within a single test file, see `web/docs/test.md` § Coverage Goals.
 
 | Scope | Rule |
 |-------|------|
@@ -227,12 +227,12 @@ Failing tests compound:
 
 **Fix failures immediately before proceeding.**
 
-## Integration with Claude's Todo Feature
+## Integration with Codex's Todo Feature
 
-When using Claude for multi-file testing:
+When using Codex for multi-file testing:
 
-1. **Ask Claude to create a todo list** before starting
-1. **Request one file at a time** or ensure Claude processes incrementally
+1. **Create a todo list** before starting
+1. **Process one file at a time**
 1. **Verify each test passes** before asking for the next
 1. **Mark todos complete** as you progress
 

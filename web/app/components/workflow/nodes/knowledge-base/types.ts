@@ -1,5 +1,5 @@
 import type { IndexingType } from '@/app/components/datasets/create/step-two'
-import type { Model } from '@/app/components/header/account-setting/model-provider-page/declarations'
+import type { Model, ModelItem } from '@/app/components/header/account-setting/model-provider-page/declarations'
 import type { CommonNodeType } from '@/app/components/workflow/types'
 import type { RerankingModeEnum, WeightedScoreEnum } from '@/models/datasets'
 import type { RETRIEVE_METHOD } from '@/types/app'
@@ -32,7 +32,7 @@ export type WeightedScore = {
   }
 }
 
-export type RetrievalSetting = {
+type RetrievalSetting = {
   search_method?: RETRIEVE_METHOD
   reranking_enable?: boolean
   reranking_model?: RerankingModel
@@ -41,6 +41,12 @@ export type RetrievalSetting = {
   score_threshold_enabled: boolean
   score_threshold: number
   reranking_mode?: RerankingModeEnum
+}
+export type SummaryIndexSetting = {
+  enable?: boolean
+  model_name?: string
+  model_provider_name?: string
+  summary_prompt?: string
 }
 export type KnowledgeBaseNodeType = CommonNodeType & {
   index_chunk_variable_selector: string[]
@@ -51,5 +57,7 @@ export type KnowledgeBaseNodeType = CommonNodeType & {
   keyword_number: number
   retrieval_model: RetrievalSetting
   _embeddingModelList?: Model[]
+  _embeddingProviderModelList?: ModelItem[]
   _rerankModelList?: Model[]
+  summary_index_setting?: SummaryIndexSetting
 }

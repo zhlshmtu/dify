@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from '@storybook/nextjs'
+import type { Meta, StoryObj } from '@storybook/nextjs-vite'
 import type { DatePickerProps } from './types'
 import { useState } from 'react'
 import { fn } from 'storybook/test'
@@ -35,7 +35,6 @@ const DatePickerPlayground = (props: DatePickerProps) => {
   return (
     <div className="inline-flex flex-col items-start gap-3">
       <DatePicker
-        popupZIndexClassname="z-50"
         {...props}
         value={value}
         onChange={setValue}
@@ -65,7 +64,6 @@ export const Playground: Story = {
 const [value, setValue] = useState(getDateWithTimezone({}))
 
 <DatePicker
-  popupZIndexClassname="z-50"
   value={value}
   timezone={dayjs.tz.guess()}
   onChange={setValue}
