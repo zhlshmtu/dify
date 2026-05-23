@@ -515,9 +515,8 @@ services:
       SANDBOX_PORT: ${SANDBOX_PORT:-8194}
       PIP_MIRROR_URL: ${PIP_MIRROR_URL:-}
     volumes:
-      - ./volumes/sandbox/conf:/conf 
       - ./volumes/sandbox/dependencies:/dependencies
-      - ./volumes/sandbox/appdata:/appdata
+      - ./volumes/sandbox/conf:/conf
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8194/health"]
     networks:
@@ -711,13 +710,7 @@ services:
     volumes:
       # Mount the Weaviate data directory to the con tainer.
       - ./volumes/weaviate:/var/lib/weaviate
-      - ./volumes/weaviate_backups:/var/lib/weaviate/backups
-    ports:
-      - "8080:8080"
-      - "50051:50051"  
     environment:
-      ENABLE_MODULES: backup-filesystem
-      BACKUP_FILESYSTEM_PATH: /var/lib/weaviate/backups
       # The Weaviate configurations
       # You can refer to the [Weaviate](https://weaviate.io/developers/weaviate/config-refs/env-vars) documentation for more information.
       PERSISTENCE_DATA_PATH: ${WEAVIATE_PERSISTENCE_DATA_PATH:-/var/lib/weaviate}
