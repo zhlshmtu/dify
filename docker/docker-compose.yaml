@@ -1193,7 +1193,6 @@ services:
     environment:
       - XINFERENCE_MODEL_SRC=modelscope
       - XINFERENCE_HOME=/root/appdata
-      - LD_LIBRARY_PATH=/opt/conda/envs/ffmpeg-env/lib:$LD_LIBRARY_PATH
     volumes:
       - ./xinference/appdata:/root/appdata
     ports:
