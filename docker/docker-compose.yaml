@@ -1192,9 +1192,9 @@ services:
     restart: always
     environment:
       - XINFERENCE_MODEL_SRC=modelscope
-      - XINFERENCE_HOME=/root/appdata_v2
+      - XINFERENCE_HOME=/root/appdata
     volumes:
-      - ./xinference/appdata:/root/appdata
+      - ./xinference/appdata_v2:/root/appdata
     ports:
       - 9997:9997
     deploy:
