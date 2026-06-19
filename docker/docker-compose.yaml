@@ -1195,7 +1195,7 @@ services:
     volumes:
       - ./xinference/appdata:/root/appdata
     ports:
-      - 9997:9997
+      - 9998:9997
     deploy:
       resources:
         reservations:
