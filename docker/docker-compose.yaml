@@ -1187,7 +1187,7 @@ services:
 
   xinference:
     # image: registry.cn-hangzhou.aliyuncs.com/xprobe_xinference/xinference:v1.2.0
-    image: xprobe/xinference:latest-cu129
+    image: xprobe/xinference:latest
     container_name: xinference
     restart: always
     environment:
